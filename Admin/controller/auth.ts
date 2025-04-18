@@ -580,7 +580,8 @@ DeleteSubcategory: async (req: Request, res: Response) => {
       }});
       res.json({ status: 1, message: "subcategory Delete Successfully" });
     } catch (error) {
-      res.status(500).json({ status: 0, message: 'Failed to delete subcategories' });
+      console.error('Failed to update subcategory:', error);
+      res.status(500).json({ status: 0, message: 'Failed to delete subcategory' });
 
      }
 },
@@ -933,8 +934,9 @@ GetSupport : async (req: Request, res: Response) => {
           res.status(200).json({ status: 1, message: "Message send successfully" });
           
         } catch (error) {
-          res.status(500).json({ status: 0, message: 'Failed to send message' });
-
+          console.error('Failed to send :', error);
+          res.status(500).json({ status: 0, message: 'Failed to send ' });
+    
           
         }
       },
@@ -961,7 +963,7 @@ GetSupport : async (req: Request, res: Response) => {
           const result = await Promise.all(postDetails.map(async (post: any) => {
             const postJSON = post.toJSON();
       
-            const membersData = postJSON.group?.members || [];
+            const membersData = postJSON.group?.members ?? [];
             console.log(membersData,"MEMBER DATA");
             
       
@@ -977,9 +979,9 @@ GetSupport : async (req: Request, res: Response) => {
                 console.log(`Looking for userId: ${member.userId}`, '=> Found:', !!user);
             
                 return {
-                  id:user?.id || null ,
-                  name: user?.FirstName || null,
-                  image: user?.image || null,
+                  id:user?.id ?? null ,
+                  name: user?.FirstName ?? null,
+                  image: user?.image ?? null,
                 };
               })
             );

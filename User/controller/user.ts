@@ -591,7 +591,7 @@ export default {
           IsOnRequest,
           IsBosted
         })
-   const AddGroup = await Group.create({
+         await Group.create({
           createdBy: userId,
           postId: AddPost.id,
           maxSize: GroupSize, // Ensure GroupSize is defined and matches the required type
@@ -632,7 +632,7 @@ export default {
     
         // Transform data to include joinedCount
         const result = posts.map((post: any) => {
-          const members = post.group?.members || [];
+          const members = post.group?.members ?? [];
           return {
             ...post.toJSON(),
             joinedCount: members.length,
@@ -822,9 +822,8 @@ export default {
         if (!userId || !postId || !memberId || !action) {
           return res.status(400).json({ status: 0, message: 'Missing required fields' });
         }
-    const membersData = await User.findOne({where:{
-      id:memberId
-    }})
+    
+        const membersData = await User.findOne({ where: { id: memberId } });
         const group = await Group.findOne({ where: { postId } });
     
         if (!group) {
@@ -870,18 +869,19 @@ export default {
           action === 'accept'
             ? 'Group Admin has added you into the group'
             : 'Your request to join the group has been rejected by the admin';
-            if (membersData?.pushNotification == true) {
-
-        await Notification.create({
-          type: notificationType,
-          userId: memberId,
-          senderId: userId,
-          title: notificationTitle,
-          body: notificationBody,
-          moduleId: postId
-        });
     
-      }
+        // Instead of directly checking if membersData?.pushNotification is true, use a more explicit check
+        if (membersData?.pushNotification === true) {
+          await Notification.create({
+            type: notificationType,
+            userId: memberId,
+            senderId: userId,
+            title: notificationTitle,
+            body: notificationBody,
+            moduleId: postId
+          });
+        }
+    
         return res.status(200).json({
           status: 1,
           message: `Member request ${action === 'accept' ? 'accepted' : 'rejected'} successfully`
@@ -889,7 +889,9 @@ export default {
       } catch (error) {
         console.error('Error handling request:', error);
         return res.status(500).json({ status: 0, message: 'Internal Server Error' });
-      }},
+      }
+    },
+    
 RemoveFromGroup: async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -1232,10 +1234,8 @@ PostDetails: async (req:Request,res:Response) =>{
 
 
   } catch (error) {
-  return res.status(500).json({
-          status: 0,
-          message: 'Internal Server Error',
-        });
+    console.error("post details Error:", error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
 
     
   }
