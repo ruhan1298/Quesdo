@@ -116,7 +116,6 @@ AdminLogin: async (req: Request, res: Response) => {
 
       // Get the updated user data from the request body
       const { fullName, email, mobilenumber } = req.body;
-      console.log(req.body, "BODY");
       const image = req.file?.path; // Normalize path
 
       // Validate required fields

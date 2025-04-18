@@ -177,7 +177,7 @@ export default {
             console.error(error);
             res.status(500).json({ message: 'Internal server error' });
         }
-    },
+    },       
     ChangePass: async (req: Request, res: Response) => {
         try {
             const { oldPassword, newPassword } = req.body;
