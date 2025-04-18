@@ -10,6 +10,8 @@ import Category from "../models/category";
 import { Op, Sequelize } from "sequelize";
 import SubCategory from "../models/subcategory";
 import { Group, Interests, Post, User } from "../../model/index";
+import { randomBytes } from 'crypto';
+
 
 import Report from "../../User/models/Report";
 import customerService from "../../User/models/customerService";
@@ -206,8 +208,19 @@ AdminLogin: async (req: Request, res: Response) => {
     }
 
     // Step 2: Generate OTP (Random token for password reset)
-    const resetToken = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Generate a secure 6-digit OTP (reset token)
+    const generateResetToken = () => {
+        const token = randomBytes(3).toString('hex');  // Generate 3 random bytes (6 hexadecimal characters)
+        return token;
+    };
+    
+    // Generate expiration time for the token (10 minutes from now)
     const resetExpires = new Date(Date.now() + 10 * 60 * 1000); // OTP expiration in 10 minutes
+    
+    // Usage example:
+    const resetToken = generateResetToken();
+    console.log(resetToken, resetExpires);
     await user.update({
       resetPasswordToken: resetToken,
       resetPasswordExpires: resetExpires, // Correctly passing Date object
@@ -227,8 +240,8 @@ AdminLogin: async (req: Request, res: Response) => {
     const transporter = nodemailer.createTransport({
       service: 'gmail', // Use your email service provider
       auth: {
-        user: 'tryoutscout@gmail.com',
-        pass: 'xapfekrrmvvghexe'
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
     }
     });
 
@@ -907,8 +920,8 @@ GetSupport : async (req: Request, res: Response) => {
           const transporter = nodemailer.createTransport({
               service: "gmail",
               auth: {
-                  user: "tryoutscout@gmail.com",
-                  pass: "xapfekrrmvvghexe",
+                user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
               },
           });
       
