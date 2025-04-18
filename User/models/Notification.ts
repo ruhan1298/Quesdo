@@ -1,8 +1,7 @@
 import { Model, DataTypes } from 'sequelize';
 import sequelize from '../../model/index';
-import { v4  } from 'uuid';
 
-interface notificationAttributes {
+interface NotificationAttributes {
   id?: number; // Use string type for UUID
   type?: string;
  title?:string
@@ -17,7 +16,7 @@ senderId?:string
 
 }
 
-class Notification extends Model<notificationAttributes> {
+class Notification extends Model<NotificationAttributes> {
     id!: number; // Use string type for UUID
     type!: string;
     title!:string
@@ -79,6 +78,5 @@ Notification.init(
     modelName: 'notification',
   }
 );
-// AddCarsPost.belongsTo(Favourite, { foreignKey: 'car_id' });
 
 export default Notification;

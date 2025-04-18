@@ -9,11 +9,8 @@ import nodemailer from "nodemailer";
 import Category from "../models/category";
 import { Op, Sequelize } from "sequelize";
 import SubCategory from "../models/subcategory";
-import {sequelize} from '../../model/index'
-import { Group } from "../../model/index";
-import {Interests} from '../../model/index'
-import {Post} from '../../model/index'
-import {User} from '../../model/index'
+import { Group, Interests, Post, User } from "../../model/index";
+
 import Report from "../../User/models/Report";
 import customerService from "../../User/models/customerService";
 import GroupMember from "../../User/models/GroupMember";
@@ -304,6 +301,7 @@ OtpVerify: async (req: Request, res: Response) => {
 },
 UpdatePassword: async (req: Request, res: Response) => {
   const { email, newPassword } = req.body;
+
   try {
     const user = await Admin.findOne({ where: { email } });
 
@@ -315,19 +313,20 @@ UpdatePassword: async (req: Request, res: Response) => {
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-    user.password = hashedPassword; // Ensure 'hashedPassword' type matches 'user.password'
+    user.password = hashedPassword;
     await user.save();
 
-    return res.status(200).json({ status: 1, message: "Password update successfully" });
+    return res.status(200).json({ status: 1, message: "Password updated successfully" });
 
-  } catch (error) {
-    res.status(500).json({ status: 0, message: 'internal Server error' });
-
-
+  } catch (error: any) {
+    console.error("Error updating password:", error); // Log the actual error
+    return res.status(500).json({
+      status: 0,
+      message: 'Internal Server Error',
+    });
   }
-
 },
+
 
 AddCategory: async (req: Request, res: Response) => {
   try {
@@ -439,16 +438,33 @@ UpdateCategory: async (req: Request, res: Response) => {
 },
 DeleteCategory: async (req: Request, res: Response) => {
   try {
-      const id = req.body.id;
-       await Category.destroy({where:{
-          id:id
-      }});
-      res.json({ status: 1, message: "category Delete Successfully" });
-    } catch (error) {
-      res.status(500).json({ status: 0, message: 'Failed to delete category' });
+    const { id } = req.body;
 
-     }
+    const deletedCount = await Category.destroy({ where: { id } });
+
+    if (deletedCount === 0) {
+      return res.status(404).json({
+        status: 0,
+        message: "Category not found or already deleted",
+      });
+    }
+
+    return res.status(200).json({
+      status: 1,
+      message: "Category deleted successfully",
+    });
+
+  } catch (error: any) {
+    console.error("Error deleting category:", error); // Log for debugging
+
+    return res.status(500).json({
+      status: 0,
+      message: 'Failed to delete category',
+      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+    });
+  }
 },
+
 GetSubCategory: async (req: Request, res: Response) => {
   try {
       // Extract and parse pagination and search parameters

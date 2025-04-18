@@ -1,7 +1,6 @@
 // models/ShowRoomUser.ts
 import { Model, DataTypes } from 'sequelize';
 import {sequelize} from '../../model/index';
-import { v4  } from 'uuid';
 
 interface InterestsAttributes {
   id?: number; // Use string type for UUID

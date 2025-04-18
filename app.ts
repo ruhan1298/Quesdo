@@ -9,7 +9,6 @@ dotenv.config();
 
 import UserRouter from './User/routes/auth';
 import AdminRouter from './Admin/routes/auth'
-import User from './User/models/user';
 
 const app = express();
 

@@ -226,7 +226,7 @@ export default {
                 user.socialId = socialId;
                 user.socialType = socialType;
                
-                user.FirstName = FirstName || user.FirstName;
+                user.FirstName = FirstName ?? user.FirstName;
     
                 // Save the updated user details
                 await user.save();
@@ -397,6 +397,7 @@ export default {
     },
     UpdatePassword: async (req: Request, res: Response) => {
       const { email, newPassword } = req.body;
+    
       try {
         const user = await User.findOne({ where: { email } });
     
@@ -406,24 +407,27 @@ export default {
             message: 'User not found',
           });
         }
-        
-        const hashedPassword = await bcrypt.hash(newPassword, 12);
     
-        user.password = hashedPassword; // Ensure 'hashedPassword' type matches 'user.password'
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+        user.password = hashedPassword;
         await user.save();
     
-        return res.status(200).json({ status: 1, message: "Password update successfully" });
-      
-      } catch (error) {
+        return res.status(200).json({
+          status: 1,
+          message: "Password updated successfully"
+        });
+    
+      } catch (error: any) {
+        console.error("Error updating password:", error); // Log actual error
+    
         return res.status(500).json({
           status: 0,
           message: 'Internal Server Error',
+          ...(process.env.NODE_ENV === 'development' && { error: error.message })
         });
-        
       }
-     
-    
     },
+    
     GetCategory: async (req: Request, res: Response) => {
       try {
         const categories = await Category.findAll();
@@ -744,65 +748,61 @@ export default {
     JoinGroup: async (req: Request, res: Response) => {
       try {
         const { postId } = req.body;
-        const userId = req.user?.id ? req.user.id.toString() : null;
+        const userId = req.user?.id?.toString();
     
         if (!userId) {
           return res.status(400).json({ message: 'User ID is missing or invalid' });
         }
-        const users = await User.findOne({where:{
-          id:userId
-        }})
     
-        // Find the group by postId
+        // Fetch user once
+        const user = await User.findOne({ where: { id: userId } });
+        if (!user) {
+          return res.status(404).json({ status: 0, message: 'User not found' });
+        }
+    
         const group = await Group.findOne({ where: { postId } });
         if (!group) {
           return res.status(404).json({ status: 0, message: 'Group not found' });
         }
     
-        // Find the related post
         const post = await Post.findOne({ where: { id: postId } });
         if (!post) {
           return res.status(404).json({ status: 0, message: 'Post not found' });
         }
-        const postedUser = await User.findOne({where:{
-          id:userId
-        }})
     
         const members: MemberDetail[] = group.members as MemberDetail[];
     
-        // Check if already a member or requested
-        if (members.some((member) => member.userId === userId)) {
+        const isAlreadyMember = members.some((member) => member.userId === userId);
+        if (isAlreadyMember) {
           return res.status(400).json({ status: 0, message: 'Already joined or requested' });
         }
     
-        // Check if group is full
-        if (members.length >= group.maxSize) {
+        const isGroupFull = members.length >= group.maxSize;
+        if (isGroupFull) {
           return res.status(400).json({ status: 0, message: 'Group is full' });
         }
     
-        // Determine status: 'pending' if isOnRequest is true, otherwise 'joined'
-        const memberStatus = post.IsOnRequest ? 'pending' : 'joined';
+        const isRequestRequired = Boolean(post.IsOnRequest);
+        const memberStatus = isRequestRequired ? 'pending' : 'joined';
         const newMember: MemberDetail = { userId, status: memberStatus };
     
         const updatedMembers: MemberDetail[] = [...members, newMember];
         await group.update({ members: updatedMembers });
     
-        // Optionally notify the post creator (createdBy) if it’s a request
-        if (post.IsOnRequest && post.userId && postedUser?.pushNotification == true) {
-         await Notification.create({
-          moduleId:postId,
-          userId:post.userId,
-          senderId:userId,
-          title:"Join Request",
-          body:`${users?.FirstName} Wants to be added to the group 
-`        
-
-        })
+        const shouldNotify = isRequestRequired && Boolean(post.userId) && Boolean(user.pushNotification);
+        if (shouldNotify) {
+          await Notification.create({
+            moduleId: postId,
+            userId: post.userId,
+            senderId: userId,
+            title: "Join Request",
+            body: `${user.FirstName} wants to be added to the group`,
+          });
         }
     
         return res.status(200).json({
           status: 1,
-          message: post.IsOnRequest
+          message: isRequestRequired
             ? 'Request sent to the group admin'
             : 'Successfully joined the group',
         });
@@ -812,6 +812,7 @@ export default {
         return res.status(500).json({ status: 0, message: 'Internal server error' });
       }
     },
+    
     
     AcceptRequest: async (req: Request, res: Response) => {
       try {
@@ -1045,18 +1046,15 @@ console.log(memberId,"MEMBER ID");
   }
 },
 AddcustomerService: async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.id
-    const { email, FirstName, phoneNumber, subject,Description } = req.body;
-    console.log(req.body, "BODY");
+  const userId = req.user?.id;
+  const { email, FirstName, phoneNumber, subject, Description } = req.body;
 
-    // Validate required fields
+  try {
     if (!email || !FirstName || !subject) {
       return res.status(400).json({ status: 0, message: 'All input is required' });
     }
 
-    // Create customer service request
-     await customerService.create({
+    await customerService.create({
       userId,
       email,
       name: FirstName,
@@ -1065,12 +1063,28 @@ AddcustomerService: async (req: Request, res: Response) => {
       Description
     });
 
-    return res.status(200).json({ status: 1, message: 'Customer service request added successfully' });
-  } catch (error) {
-    console.error('Error adding customer service request:', error);
-    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+    return res.status(200).json({
+      status: 1,
+      message: 'Customer service request added successfully'
+    });
+
+  } catch (error: any) {
+    console.error('AddcustomerService Error:', {
+      message: error.message,
+      stack: error.stack,
+      details: error
+    });
+
+    // Optional: respond differently based on the environment
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    return res.status(500).json({
+      status: 0,
+      message: 'Internal Server Error',
+      ...(isDevelopment && { error: error.message })
+    });
   }
-},
+}
+,
 HomePage: async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -1226,75 +1240,67 @@ PostDetails: async (req:Request,res:Response) =>{
     
   }
 },
-MapData: async (req:Request,res:Response)=>{
+MapData: async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id
+    const userId = req.user?.id;
     const { latitude, longitude } = req.body;
-const range = 50; // fixed to 5 km
+    const range = 50; // fixed to 5 km
 
-const posts = await Post.findAll({
-  where: {
-    userId: { [Op.ne]: userId },
-    [Op.and]: sequelize.literal(`
-      (
-        6371 * acos(
-          cos(radians(${latitude})) * cos(radians(latitude)) *
-          cos(radians(longitude) - radians(${longitude})) +
-          sin(radians(${latitude})) * sin(radians(latitude))
-        )
-      ) <= ${range}
-    `)
-  },
-  attributes: [
-    'id', 'Title', 'Location', 'image',
-    [sequelize.literal(`
-      (
-        6371 * acos(
-          cos(radians(${latitude})) * cos(radians(latitude)) *
-          cos(radians(longitude) - radians(${longitude})) +
-          sin(radians(${latitude})) * sin(radians(latitude))
-        )
-      )
-    `), 'distance']
-  ],
-  order: [[sequelize.literal('distance'), 'ASC']],
+    const posts = await Post.findAll({
+      where: {
+        userId: { [Op.ne]: userId },
+        [Op.and]: sequelize.literal(`
+          (
+            6371 * acos(
+              cos(radians(${latitude})) * cos(radians(latitude)) *
+              cos(radians(longitude) - radians(${longitude})) +
+              sin(radians(${latitude})) * sin(radians(latitude))
+            )
+          ) <= ${range}
+        `)
+      },
+      attributes: [
+        'id', 'Title', 'Location', 'image',
+        [sequelize.literal(`
+          (
+            6371 * acos(
+              cos(radians(${latitude})) * cos(radians(latitude)) *
+              cos(radians(longitude) - radians(${longitude})) +
+              sin(radians(${latitude})) * sin(radians(latitude))
+            )
+          )
+        `), 'distance']
+      ],
+      order: [[sequelize.literal('distance'), 'ASC']],
+    });
 
-   })
-    posts.map((post: any) => {
-    const members = post.group?.members || [];
-    const isJoined = members.some((member: any) => member.userId === userId);
-    const distance = parseFloat(post.get('distance')).toFixed(1); // in km
-    // const timeAgo = dayjs(post.Time).fromNow(); // e.g. "58 minutes ago"
+    // Use forEach instead of map, since the result is not being used.
+    posts.forEach((post: any) => {
+      const members = post.group?.members ?? [];
+      const isJoined = members.some((member: any) => member.userId === userId);
+      const distance = parseFloat(post.get('distance')).toFixed(1); // in km
+      // const timeAgo = dayjs(post.Time).fromNow(); // e.g. "58 minutes ago"
+      post.dataValues = {
+        ...post.dataValues,
+        joinedCount: members.length,
+        groupSize: post.GroupSize,
+        isJoined,
+        distance: `${distance} km`,
+      };
+    });
 
-    return {
-      ...post.toJSON(),
-      joinedCount: members.length,
-      groupSize: post.GroupSize,
-      isJoined,
-      distance: `${distance} km`,
-    };
-  });
+    return res.json({
+      status: 1,
+      message: "Nearby posts fetched successfully",
+      data: posts,
+    });
 
-   // const distance = parseFloat(posts.get('distance')).toFixed(1); // in km
-   
-   // return {
-   //   ...posts
-   //   // joinedCount: members.length,
-   //   // groupSize: post.GroupSize,
-   //   // isJoined,
-   //   distance: `${distance} km`,
-   //   // timeAgo,
-   // };
-   res.json({status:1,message :"Nearby Post get succsessfully", data:posts
-   })
-   
   } catch (error) {
+    console.error("MapData Error:", error);
     return res.status(500).json({ status: 0, message: 'Internal Server Error' });
-
-    
   }
-
-},
+}
+,
 
 postGroupDetails: async (req: Request, res: Response) => {
   try {
@@ -1326,29 +1332,58 @@ postGroupDetails: async (req: Request, res: Response) => {
   }
 },
 GetSettingNotification: async (req: Request, res: Response) => {
-   
   try {
-    const userId= req.user?.id
-    const GetSettingNotification= await User.findAll({
-      where:{
-        id:userId
-      },
-      attributes:['id',"reportNotification","inAppVibration","inAppSound","latitude","longitude","minDistanceKm","maxDistanceKm","ageRangeMin","ageRangeMax","pushNotification","eventUpdate","memories"]
-    })
-    res.json({
-      status:1,
-      message:"Notification setting get successfiully",
-     data:GetSettingNotification
-    })
-    
-  } catch (error) {
-    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+    const userId = req.user?.id;
 
+    if (!userId) {
+      return res.status(400).json({ status: 0, message: 'User ID is missing or invalid' });
+    }
+
+    const userSettings = await User.findOne({
+      where: { id: userId },
+      attributes: [
+        'id',
+        'reportNotification',
+        'inAppVibration',
+        'inAppSound',
+        'latitude',
+        'longitude',
+        'minDistanceKm',
+        'maxDistanceKm',
+        'ageRangeMin',
+        'ageRangeMax',
+        'pushNotification',
+        'eventUpdate',
+        'memories'
+      ]
+    });
+
+    if (!userSettings) {
+      return res.status(404).json({ status: 0, message: 'User settings not found' });
+    }
+
+    return res.json({
+      status: 1,
+      message: 'Notification settings retrieved successfully',
+      data: userSettings
+    });
+
+  } catch (error) {
+    console.error('GetSettingNotification Error:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
   }
 },
 UpdateSettingNotification: async (req: Request, res: Response) => {
   try {
-    const id = req.user?.id
+    // Extract user ID from the request object (assuming authenticated user)
+    const id = req.user?.id;
+
+    // Validate if user ID is provided
+    if (!id) {
+      return res.status(400).json({ status: 0, message: 'User ID is missing or invalid' });
+    }
+
+    // Destructure request body
     const {
       reportNotification,
       inAppVibration,
@@ -1363,42 +1398,40 @@ UpdateSettingNotification: async (req: Request, res: Response) => {
       eventUpdate,
       memories,
     } = req.body;
+
+    // Find the user by primary key (id)
     let user = await User.findByPk(id);
-    
-      
-    
+
+    // If user is not found, return a 404 error
     if (!user) {
-        return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ status: 0, message: 'User not found' });
     }
 
+    // Update user settings using nullish coalescing (??) to keep existing values if not provided
+    user.reportNotification = reportNotification ?? user.reportNotification;
+    user.inAppVibration = inAppVibration ?? user.inAppVibration;
+    user.inAppSound = inAppSound ?? user.inAppSound;
+    user.latitude = latitude ?? user.latitude;
+    user.longitude = longitude ?? user.longitude;
+    user.maxDistanceKm = maxDistanceKm ?? user.maxDistanceKm;
+    user.minDistanceKm = minDistanceKm ?? user.minDistanceKm;
+    user.ageRangemax = ageRangeMax ?? user.ageRangemax;
+    user.ageRangeMin = ageRangeMin ?? user.ageRangeMin;
+    user.pushNotification = pushNotification ?? user.pushNotification;
+    user.eventUpdate = eventUpdate ?? user.eventUpdate;
+    user.memories = memories ?? user.memories;
 
-    user.reportNotification = reportNotification || user.reportNotification;
-    user.inAppVibration = inAppVibration || user.inAppVibration;
-    user.inAppSound = inAppSound || user.inAppSound;
-    user.latitude = latitude || user.latitude;
-    user.longitude = longitude || user.longitude;
-    user.maxDistanceKm = maxDistanceKm || user.maxDistanceKm
-    user.minDistanceKm =minDistanceKm || user.minDistanceKm;
-user.ageRangemax =  ageRangeMax || user.ageRangemax 
-user.ageRangeMin = ageRangeMin  ||user.ageRangeMin
-user.pushNotification = pushNotification  ||user.pushNotification
-user.eventUpdate = eventUpdate  ||user.eventUpdate
-user.memories= memories  ||user.memories
+    // Save updated user settings
+    await user.save();
 
-
-
-
-
-
-await user.save();
-
-
-res.json({status:1, message:"Notification update successfully"})
-
-    
+    // Return success response
+    res.json({ status: 1, message: 'Notification settings updated successfully' });
   } catch (error) {
-    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+    // Log the error for debugging
+    console.error('Error updating notification settings:', error);
 
+    // Return a generic error message, while sending the error message to logs
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
   }
 },
 GetNotification :async (req:Request,res:Response)=>{
@@ -1411,8 +1444,10 @@ GetNotification :async (req:Request,res:Response)=>{
     })
     res.json({status:1,message:"Notification get successfully",data:GetNotification})
   } catch (error) {
-    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+    console.error('Error updating notification settings:', error);
 
+    // Return a generic error message, while sending the error message to logs
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
     
   }
 },
@@ -1422,13 +1457,12 @@ GetAllSubcategory:async (req:Request,res:Response) =>{
     res.json({status:1,message:"subcategory get successfully",data:GetAllSubcategory})
     
   } catch (error) {
-    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+    console.error('Error updating notification settings:', error);
 
+    // Return a generic error message, while sending the error message to logs
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
   }
 
 
 }
 }
-// function template(emailData: { companyName: string; firstName: string; action: string; otp: string; otpExpiry: string; }) {
-//     throw new Error("Function not implemented.");
-// }

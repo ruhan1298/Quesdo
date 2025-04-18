@@ -20,7 +20,7 @@ interface CustomerServiceAttributes  {
 
 }
 
-class customerService extends Model<CustomerServiceAttributes > {
+class CustomerService extends Model<CustomerServiceAttributes > {
     id!: number; // Use string type for UUID
     name!: string;
     email!:string;
@@ -33,7 +33,7 @@ class customerService extends Model<CustomerServiceAttributes > {
 
 }
 
-customerService.init(
+CustomerService.init(
   {
    
     id: {
@@ -85,4 +85,4 @@ allowNull:true
   }
 );
 
-export default customerService
+export default CustomerService
