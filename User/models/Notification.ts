@@ -1,9 +1,6 @@
 import { Model, DataTypes } from 'sequelize';
 import sequelize from '../../model/index';
-import { v4 as uuidv4 } from 'uuid';
-import { Default } from 'sequelize-typescript';
-import { types } from 'util';
-// import AddCarsPost from '../models/AddCarsPost';
+import { v4  } from 'uuid';
 
 interface notificationAttributes {
   id?: number; // Use string type for UUID

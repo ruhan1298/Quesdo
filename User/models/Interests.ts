@@ -1,12 +1,7 @@
 // models/ShowRoomUser.ts
 import { Model, DataTypes } from 'sequelize';
 import {sequelize} from '../../model/index';
-import { v4 as uuidv4 } from 'uuid';
-import { Default } from 'sequelize-typescript';
-// import SubCategory from './subcategory';
-
-// import { Default } from 'sequelize-typescript';
-// import AddCarsPost from '../models/AddCarsPost';
+import { v4  } from 'uuid';
 
 interface InterestsAttributes {
   id?: number; // Use string type for UUID
@@ -27,8 +22,6 @@ class Interests extends Model<InterestsAttributes > {
     userId!: string;
   
 
-    // role!:string;
-    // permissions!: string[]; // Store allowed actions
 
 
    
@@ -62,6 +55,5 @@ Interests.init(
     modelName: 'Interests',
   }
 );
-// AddCarsPost.belongsTo(Favourite, { foreignKey: 'car_id' });
 
 export default Interests

@@ -3,8 +3,6 @@ const router: Router = express.Router();
 import UserController from '../../User/controller/user';
 import upload from '../../middleware/upload';
 import UserAuth from '../../middleware/UserAuth';
-import user from '../../User/controller/user';
-import userAuth from '../../middleware/UserAuth';
 router.post("/register", (req: Request, res: Response) => {
     UserController.UserRegister(req, res);
   });
@@ -44,7 +42,7 @@ router.post("/register", (req: Request, res: Response) => {
   
       UserController.UpdatePassword(req, res);
     })
-    router.post("/get-category",userAuth, (req: Request, res: Response) => {
+    router.post("/get-category",UserAuth, (req: Request, res: Response) => {
   
   
       UserController.GetCategory(req, res);
@@ -54,104 +52,104 @@ router.post("/register", (req: Request, res: Response) => {
   
       UserController.GetSubcategory(req, res);
     })
-    router.post("/complete-profile",upload.single('image'), userAuth,(req: Request, res: Response) => {
+    router.post("/complete-profile",upload.single('image'), UserAuth,(req: Request, res: Response) => {
   
   
       UserController.CompleteProfile(req, res);
     })
-    router.post("/get-profile", userAuth,(req: Request, res: Response) => {
+    router.post("/get-profile", UserAuth,(req: Request, res: Response) => {
   
   
       UserController.GetProfile(req, res);
     })
 
-    router.post("/add-post",upload.single('image'), userAuth,(req: Request, res: Response) => {
+    router.post("/add-post",upload.single('image'), UserAuth,(req: Request, res: Response) => {
   
   
       UserController.AddPost(req, res);
     })
-    router.post("/get-post",userAuth,(req: Request, res: Response) => {
+    router.post("/get-post",UserAuth,(req: Request, res: Response) => {
   
   
       UserController.GetPost(req, res);
     })
-    router.post("/delete-post",userAuth,(req: Request, res: Response) => {
+    router.post("/delete-post",UserAuth,(req: Request, res: Response) => {
   
   
       UserController.DeletePost(req, res);
     })
     
-    router.post("/update-post",upload.single('image'),userAuth,(req: Request, res: Response) => {
+    router.post("/update-post",upload.single('image'),UserAuth,(req: Request, res: Response) => {
   
   
       UserController.UpdatePost(req, res);
     })
     
-    router.post("/join-group",userAuth,(req: Request, res: Response) => {
+    router.post("/join-group",UserAuth,(req: Request, res: Response) => {
   
   
       UserController.JoinGroup(req, res);
     })
 
-    router.post("/Accept-request",userAuth,(req: Request, res: Response) => {
+    router.post("/Accept-request",UserAuth,(req: Request, res: Response) => {
   
   
       UserController.AcceptRequest(req, res);
     })
-    router.post("/remove-member",userAuth,(req: Request, res: Response) => {
+    router.post("/remove-member",UserAuth,(req: Request, res: Response) => {
   
   
     })
-    router.post("/left-group",userAuth,(req: Request, res: Response) => {
+    router.post("/left-group",UserAuth,(req: Request, res: Response) => {
   
   
       UserController.LeftFromGroup(req, res);
     })
-router.post("/report",userAuth,(req: Request, res: Response) => {
+router.post("/report",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.ReportMember(req, res);
       })
-      router.post("/add-customerservice",userAuth,(req: Request, res: Response) => {
+      router.post("/add-customerservice",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.AddcustomerService(req, res);
       })
-      router.post("/home-page",userAuth,(req: Request, res: Response) => {
+      router.post("/home-page",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.HomePage(req, res);
       })
 
-      router.post("/post-details",userAuth,(req: Request, res: Response) => {
+      router.post("/post-details",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.PostDetails(req, res);
       })
 
-      router.post("/map-data",userAuth,(req: Request, res: Response) => {
+      router.post("/map-data",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.MapData(req, res);
       })
-      router.post("/group-details",userAuth,(req: Request, res: Response) => {
+      router.post("/group-details",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.postGroupDetails(req, res);
       })
 
-      router.post("/notification-setting",userAuth,(req: Request, res: Response) => {
+      router.post("/notification-setting",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.GetSettingNotification(req, res);
       })
-      router.post("/get-notification",userAuth,(req: Request, res: Response) => {
+      router.post("/get-notification",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.GetNotification(req, res);
       })
 
-      router.post("/getall-subcategory",userAuth,(req: Request, res: Response) => {
+      router.post("/getall-subcategory",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.GetAllSubcategory(req, res);

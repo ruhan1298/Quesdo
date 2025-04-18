@@ -1,9 +1,7 @@
 // models/ShowRoomUser.ts
 import { Model, DataTypes } from 'sequelize';
 import {sequelize} from '../../model/index';
-import { v4 as uuidv4 } from 'uuid';
-import { Default } from 'sequelize-typescript';
-// import AddCarsPost from '../models/AddCarsPost';
+import { v4  } from 'uuid';
 
 interface AdminAttributes {
   id?: string; // Use string type for UUID
@@ -31,8 +29,7 @@ class Admin extends Model<AdminAttributes> {
     resetPasswordToken!:string
     resetPasswordExpires!:Date
 
-    // role!:string;
-    // permissions!: string[]; // Store allowed actions
+
 
 
    
@@ -85,6 +82,5 @@ Admin.init(
     modelName: 'Admin',
   }
 );
-// AddCarsPost.belongsTo(Favourite, { foreignKey: 'car_id' });
 
 export default Admin;

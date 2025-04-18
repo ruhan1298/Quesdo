@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import path from "path";
 import fs from "fs";
-import hbs, { log } from "handlebars";
+import hbs from "handlebars";
 
 import User from "../models/user";
 import bcrypt from "bcrypt";
@@ -16,7 +16,6 @@ import customerService from "../models/customerService";
 import GroupMember from "../models/GroupMember";
 import Notification from "../models/Notification";
 
-// import Group from "../models/GroupMember";
 const templatePath = path.join(__dirname, '../../views/otptemplate.hbs');
 const source = fs.readFileSync(templatePath, 'utf-8');
 const template = hbs.compile(source);
@@ -98,8 +97,7 @@ export default {
             if (!user) {
                 return res.status(400).json({ status: 0, message: "Invalid Email" });
             }
-            // user.deviceToken = deviceId;
-            // user.deviceType = deviceType;        // Compare the provided password with the stored hashed password
+         
             await user.save(); // Save the updated user object
     
             const isPasswordValid = await bcrypt.compare(password, user.password as unknown as string);
@@ -116,7 +114,6 @@ export default {
                     email: user.email,
                 },
                 process.env.TOKEN_KEY as string, // Use your secret key stored in .env
-                // { expiresIn: '1h' } // Token expiration time (optional)
             );
     
             // Respond with user data and the generated token
@@ -149,15 +146,11 @@ export default {
             }
     
             // Get the updated user data from the request body
-            const { FirstName, email,dob,gender,interests } = req.body;
+            const { FirstName, email,dob,gender } = req.body;
     
     console.log(req.body,"boDY");
     const image = req.file?.path; // Normalize path
     
-            // Validate required fields
-            
-            // Assuming you're using Mongoose to interact with your database
-            // You can modify this to use Sequelize or your specific ORM
             let user = await User.findByPk(user_id);
     
       
@@ -167,11 +160,11 @@ export default {
             }
     
                 // Update the user's information
-          user.FirstName = FirstName || user.FirstName;
-          user.email = email || user.email;
-          user.dob = dob|| user.dob;
-          user.image= image || user.image
-          user.gender = gender || user.gender
+          user.FirstName = FirstName ?? user.FirstName;
+          user.email = email ?? user.email;
+          user.dob = dob ?? user.dob;
+          user.image= image ?? user.image
+          user.gender = gender ?? user.gender
           // user.Interests = interests || user.Interests
 
 
@@ -230,11 +223,9 @@ export default {
             let user = await User.findOne({ where: { email } });
     
             if (user) {
-                // Update user with social login details if user already exists
                 user.socialId = socialId;
                 user.socialType = socialType;
-                // user.deviceToken = deviceToken;
-                // user.deviceType = deviceType;
+               
                 user.FirstName = FirstName || user.FirstName;
     
                 // Save the updated user details
@@ -424,6 +415,10 @@ export default {
         return res.status(200).json({ status: 1, message: "Password update successfully" });
       
       } catch (error) {
+        return res.status(500).json({
+          status: 0,
+          message: 'Internal Server Error',
+        });
         
       }
      
@@ -475,16 +470,11 @@ export default {
         // 👇 Parse Interests from form-data
         let interestArray: number[] = [];
         if (req.body.Interests) {
-          try {
             interestArray = JSON.parse(req.body.Interests);
             if (!Array.isArray(interestArray)) {
               return res.status(400).json({ message: 'Interests should be a JSON array' });
             }
-          } catch (e) {
-            return res.status(400).json({
-              message: 'Invalid Interests format. Use JSON array like [2, 3, 5]',
-            });
-          }
+       
         }
     
         const user = await User.findByPk(user_id);
@@ -493,10 +483,10 @@ export default {
         }
     
         // ✅ Basic profile update
-        user.FirstName = FirstName || user.FirstName;
-        user.gender = gender || user.gender;
-        user.dob = dob || user.dob;
-        user.image = image || user.image;
+        user.FirstName = FirstName ?? user.FirstName;
+        user.gender = gender ?? user.gender;
+        user.dob = dob ?? user.dob;
+        user.image = image ??user.image;
         user.isCompletedProfile = true;
     
         await user.save();
@@ -706,18 +696,18 @@ export default {
         const { Title, GroupSize, Time, Description, Location, subcategoryId, Latitude, Longitude,IsOnRequest,IsAddAutomatically,IsBosted} = req.body;
         const image = req.file?.path; // Normalize path
     
-        post.Title = Title || post.Title;
-        post.GroupSize = GroupSize || post.GroupSize;
-        post.Time = Time || post.Time;
-        post.Description = Description || post.Description;
-        post.Location = Location || post.Location;
-        post.subcategoryId = subcategoryId || post.subcategoryId;
-        post.Latitude = Latitude || post.Latitude;
-        post.Longitude = Longitude || post.Longitude;
-        post.image = image || post.image; // Update image only if provided
-        post.IsOnRequest = IsOnRequest || post.IsOnRequest;
-        post.IsAddAutomatically = IsAddAutomatically || post.IsAddAutomatically;
-        post.IsBosted = IsBosted || post.IsBosted;
+        post.Title = Title ?? post.Title;
+        post.GroupSize = GroupSize ?? post.GroupSize;
+        post.Time = Time ?? post.Time;
+        post.Description = Description ?? post.Description;
+        post.Location = Location ?? post.Location;
+        post.subcategoryId = subcategoryId ?? post.subcategoryId;
+        post.Latitude = Latitude ?? post.Latitude;
+        post.Longitude = Longitude ??post.Longitude;
+        post.image = image ?? post.image; // Update image only if provided
+        post.IsOnRequest = IsOnRequest ?? post.IsOnRequest;
+        post.IsAddAutomatically = IsAddAutomatically ?? post.IsAddAutomatically;
+        post.IsBosted = IsBosted ?? post.IsBosted;
         await post.save();
 
         if (group?.members && Array.isArray(group.members)) {
@@ -799,7 +789,7 @@ export default {
     
         // Optionally notify the post creator (createdBy) if it’s a request
         if (post.IsOnRequest && post.userId && postedUser?.pushNotification == true) {
-        const sendNotification= await Notification.create({
+         await Notification.create({
           moduleId:postId,
           userId:post.userId,
           senderId:userId,
@@ -1035,7 +1025,7 @@ if (!memberIds.includes(memberId)) {
 console.log(memberId,"MEMBER ID");
 
 
-    const AddReport = await Report.create({
+  await Report.create({
       reporterId: userId,
       reportedId: memberId,
       groupId: group.id,
@@ -1066,7 +1056,7 @@ AddcustomerService: async (req: Request, res: Response) => {
     }
 
     // Create customer service request
-    const customerServiceRequest = await customerService.create({
+     await customerService.create({
       userId,
       email,
       name: FirstName,
@@ -1132,7 +1122,7 @@ HomePage: async (req: Request, res: Response) => {
     });
 
     const result = posts.map((post: any) => {
-      const members = post.group?.members || [];
+      const members = post.group?.members ?? [];
       const isJoined = members.some((member: any) => member.userId === userId);
       const distance = parseFloat(post.get('distance')).toFixed(1); // in km
       // const timeAgo = dayjs(post.Time).fromNow(); // e.g. "58 minutes ago"
@@ -1205,7 +1195,7 @@ PostDetails: async (req:Request,res:Response) =>{
     });
 
     const result = posts.map((post: any) => {
-      const members = post.group?.members || [];
+      const members = post.group?.members ?? [];
       const isJoined = members.some((member: any) => member.userId === userId);
       const distance = parseFloat(post.get('distance')).toFixed(1); // in km
       // const timeAgo = dayjs(post.Time).fromNow(); // e.g. "58 minutes ago"
@@ -1228,8 +1218,10 @@ PostDetails: async (req:Request,res:Response) =>{
 
 
   } catch (error) {
-    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
-
+  return res.status(500).json({
+          status: 0,
+          message: 'Internal Server Error',
+        });
 
     
   }
@@ -1268,7 +1260,7 @@ const posts = await Post.findAll({
   order: [[sequelize.literal('distance'), 'ASC']],
 
    })
-   const result = posts.map((post: any) => {
+    posts.map((post: any) => {
     const members = post.group?.members || [];
     const isJoined = members.some((member: any) => member.userId === userId);
     const distance = parseFloat(post.get('distance')).toFixed(1); // in km
@@ -1280,7 +1272,6 @@ const posts = await Post.findAll({
       groupSize: post.GroupSize,
       isJoined,
       distance: `${distance} km`,
-      // timeAgo,
     };
   });
 

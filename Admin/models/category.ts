@@ -1,12 +1,7 @@
 // models/ShowRoomUser.ts
 import { Model, DataTypes } from 'sequelize';
 import {sequelize} from '../../model/index';
-import { v4 as uuidv4 } from 'uuid';
-import { Default } from 'sequelize-typescript';
-// import SubCategory from './subcategory';
-
-// import { Default } from 'sequelize-typescript';
-// import AddCarsPost from '../models/AddCarsPost';
+import { v4  } from 'uuid';
 
 interface CategoryDataAttributes {
   id?: number; // Use string type for UUID
@@ -21,10 +16,6 @@ interface CategoryDataAttributes {
 class Category extends Model<CategoryDataAttributes> {
     id!: number; // Use string type for UUID
     Name!: string;
-  
-
-    // role!:string;
-    // permissions!: string[]; // Store allowed actions
 
 
    
@@ -53,6 +44,5 @@ Category.init(
     modelName: 'Category',
   }
 );
-// AddCarsPost.belongsTo(Favourite, { foreignKey: 'car_id' });
 
 export default Category;

@@ -9,8 +9,11 @@ import nodemailer from "nodemailer";
 import Category from "../models/category";
 import { Op, Sequelize } from "sequelize";
 import SubCategory from "../models/subcategory";
-import sequelize, { Group, Interests, Post, User } from "../../model";
-import { triggerAsyncId } from "async_hooks";
+import {sequelize} from '../../model/index'
+import { Group } from "../../model/index";
+import {Interests} from '../../model/index'
+import {Post} from '../../model/index'
+import {User} from '../../model/index'
 import Report from "../../User/models/Report";
 import customerService from "../../User/models/customerService";
 import GroupMember from "../../User/models/GroupMember";
@@ -130,10 +133,10 @@ AdminLogin: async (req: Request, res: Response) => {
       }
 
       // Update the user's information
-      user.fullName = fullName || user.fullName;
-      user.email = email || user.email;
-      user.mobilenumber = mobilenumber || user.mobilenumber;
-      user.image = image || user.image;
+      user.fullName = fullName ?? user.fullName;
+      user.email = email ?? user.email;
+      user.mobilenumber = mobilenumber ?? user.mobilenumber;
+      user.image = image ?? user.image;
       
       await user.save();
 
@@ -319,6 +322,8 @@ UpdatePassword: async (req: Request, res: Response) => {
     return res.status(200).json({ status: 1, message: "Password update successfully" });
 
   } catch (error) {
+    res.status(500).json({ status: 0, message: 'internal Server error' });
+
 
   }
 
@@ -327,12 +332,6 @@ UpdatePassword: async (req: Request, res: Response) => {
 AddCategory: async (req: Request, res: Response) => {
   try {
       const Name = req.body.Name
-      // console.log(req.file,"FILES");
-       
-      // const image = req.file?.path
-
-      // console.log(image,"image");
-
       const Addcat= await Category.create({
           Name
       }) 
@@ -415,12 +414,8 @@ AddSubCategory: async (req: Request, res: Response) => {
 },
 UpdateCategory: async (req: Request, res: Response) => {
   try {
-      const { id ,Name} = req.body; // Category ID to update
-      // console.log(req.file, "FILES");
-
-      // const image = req.file?.path; // Normalize path
-
-      // Check if category exists
+      const { id ,Name} = req.body; 
+      
       const existingCategory = await Category.findByPk(id);
       if (!existingCategory) {
           return res.status(404).json({ status: 0, message: 'Category not found' });
@@ -428,8 +423,7 @@ UpdateCategory: async (req: Request, res: Response) => {
 
       // Update the category
       const updatedCategory = await existingCategory.update({
-          Name: Name || existingCategory.Name,
-          // image: image || existingCategory.image, // Keep existing image if no new file is uploaded
+          Name: Name ?? existingCategory.Name,
       });
 
       res.json({
@@ -446,11 +440,14 @@ UpdateCategory: async (req: Request, res: Response) => {
 DeleteCategory: async (req: Request, res: Response) => {
   try {
       const id = req.body.id;
-      const DeleteCategory = await Category.destroy({where:{
+       await Category.destroy({where:{
           id:id
       }});
       res.json({ status: 1, message: "category Delete Successfully" });
-    } catch (error) { }
+    } catch (error) {
+      res.status(500).json({ status: 0, message: 'Failed to delete category' });
+
+     }
 },
 GetSubCategory: async (req: Request, res: Response) => {
   try {
@@ -541,10 +538,10 @@ UpdateSubcategory: async (req: Request, res: Response) => {
 
       // Update the subcategory
       const updatedSubCategory = await existingSubCategory.update({
-          Name: Name || existingSubCategory.Name,
-          image: image || existingSubCategory.image,
+          Name: Name ?? existingSubCategory.Name,
+          image: image ?? existingSubCategory.image,
 
-          category_id: category_id || existingSubCategory.category_id,
+          category_id: category_id ?? existingSubCategory.category_id,
       });
 
       res.json({
@@ -562,11 +559,14 @@ UpdateSubcategory: async (req: Request, res: Response) => {
 DeleteSubcategory: async (req: Request, res: Response) => {
   try {
       const id = req.body.id;
-      const DeletesubCategory = await SubCategory.destroy({where:{
+       await SubCategory.destroy({where:{
           id:id
       }});
       res.json({ status: 1, message: "subcategory Delete Successfully" });
-    } catch (error) { }
+    } catch (error) {
+      res.status(500).json({ status: 0, message: 'Failed to delete subcategories' });
+
+     }
 },
 UserList: async (req: Request, res: Response) => {
   try {
@@ -688,18 +688,10 @@ DeleteUser: async (req: Request, res: Response) => {
     });
 
     // Step 2: Remove user from all group members list (if `members` is JSON array)
-    const groups = await Group.findAll({
+   await Group.findAll({
       where: Sequelize.where(Sequelize.fn('JSON_CONTAINS', Sequelize.col('members'), JSON.stringify(id)), 1),
     });
 
-    // for (const group of groups) {
-    //   const members = group.members; // assuming 'members' is a JSON field (array of user IDs)
-    //   const updatedMembers = members.filter((memberId: string) => memberId !== id);
-
-    //   await group.update({ members: updatedMembers });
-    // }
-
-    // Step 3: Delete the user
     await User.destroy({
       where: { id },
     });
@@ -883,10 +875,7 @@ GetSupport : async (req: Request, res: Response) => {
           const replytemailtemplatePath = path.join(__dirname, "../../views/reply-email.hbs");
           const replytemplateSource = fs.readFileSync(replytemailtemplatePath, "utf-8");
           const compiledTemplate = hbs.compile(replytemplateSource);
-          const emailContent = compiledTemplate({
-            subject: support.subject,
-            reply: reply,
-          });
+         
      
           const emailData = {
               companyName: "Your Company Name",
@@ -928,7 +917,8 @@ GetSupport : async (req: Request, res: Response) => {
           res.status(200).json({ status: 1, message: "Message send successfully" });
           
         } catch (error) {
-          
+          res.status(500).json({ status: 0, message: 'Failed to send message' });
+
           
         }
       },
@@ -966,7 +956,7 @@ GetSupport : async (req: Request, res: Response) => {
                   where: { id: member.userId },
                   attributes: ['id','FirstName', 'image']
                 });
-            ;console.log(user,"USER");
+          console.log(user,"USER");
             
                 console.log(`Looking for userId: ${member.userId}`, '=> Found:', !!user);
             
@@ -987,9 +977,9 @@ GetSupport : async (req: Request, res: Response) => {
               members: enrichedMembers,
               joinedCount: enrichedMembers.length,
               groupSize: postJSON.GroupSize,
-              createByUserid:post.user?.id || null ,
-              CreatedBy: post.user?.FirstName || null,
-              userImage: post.user?.image || null,
+              createByUserid:post.user?.id ?? null ,
+              CreatedBy: post.user?.FirstName ?? null,
+              userImage: post.user?.image ?? null,
             };
           }));
       

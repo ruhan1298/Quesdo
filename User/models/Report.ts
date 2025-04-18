@@ -2,11 +2,6 @@
 import { Model, DataTypes } from 'sequelize';
 import {sequelize} from '../../model/index';
 import { v4 as uuidv4 } from 'uuid';
-import { Default } from 'sequelize-typescript';
-// import SubCategory from './subcategory';
-
-// import { Default } from 'sequelize-typescript';
-// import AddCarsPost from '../models/AddCarsPost';
 
 interface ReportAttributes {
   id?: number; // Use string type for UUID
@@ -87,6 +82,5 @@ Report.init(
     modelName: 'Report',
   }
 );
-// AddCarsPost.belongsTo(Favourite, { foreignKey: 'car_id' });
 
 export default Report

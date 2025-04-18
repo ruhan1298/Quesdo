@@ -2,9 +2,8 @@
 import { Model, DataTypes } from 'sequelize';
 import { sequelize } from '../../model/index';
 
-// import AddCarsPost from '../models/AddCarsPost';
 
-interface customerSeviceAttributes {
+interface CustomerServiceAttributes  {
     id?: number; // Use string type for UUID
     name?: string;
     email?:string;
@@ -21,7 +20,7 @@ interface customerSeviceAttributes {
 
 }
 
-class customerService extends Model<customerSeviceAttributes> {
+class customerService extends Model<CustomerServiceAttributes > {
     id!: number; // Use string type for UUID
     name!: string;
     email!:string;
@@ -85,6 +84,5 @@ allowNull:true
     modelName: 'customerService',
   }
 );
-// Review.belongsTo(Admin, { foreignKey: 'reviewerId', as: 'reviewer' });
 
 export default customerService
