@@ -3,8 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-        "build": "tsc",
-
+    "build": "tsc",
     "start": "nodemon --exec ts-node app.ts"
   },
   "dependencies": {
@@ -15,6 +14,7 @@
     "debug": "~2.6.9",
     "dotenv": "^16.4.7",
     "express": "~4.16.1",
+    "firebase-admin": "^13.4.0",
     "haversine-distance": "^1.2.3",
     "hbs": "~4.0.4",
     "http-errors": "~1.6.3",
