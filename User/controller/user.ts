@@ -3,19 +3,24 @@ import path from "path";
 import fs from "fs";
 import hbs from "handlebars";
 import { randomBytes } from 'crypto';
-
+import {notificationQueue} from '../../middleware/notificationQueue'
 import User from "../models/user";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
-import sequelize, { Category, Group, SubCategory } from "../../model";
-import { Op } from "sequelize";
+import sequelize, { Category, GroupMember, SubCategory } from "../../model";
+import { Op, where,literal } from "sequelize";
 import Interests from "../models/Interests";
 import Post from "../models/post";
 import Report from "../models/Report";
+import moment from 'moment';
+
 import customerService from "../models/customerService";
-import GroupMember from "../models/GroupMember";
+// import GroupMember from "../models/GroupMember";
 import Notification from "../models/Notification";
+import haversine from 'haversine-distance'; // npm i haversine-distance
+import {sendRealTimeNotification} from '../../middleware/sendnotification'
+import { log } from "util";
 
 const templatePath = path.join(__dirname, '../../views/otptemplate.hbs');
 const source = fs.readFileSync(templatePath, 'utf-8');
@@ -23,13 +28,27 @@ const template = hbs.compile(source);
 interface MemberDetail {
   userId: string;
   status: 'pending' | 'joined';
+  isArchive:boolean
 }
+function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Radius of earth in KM
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c;
+  return Number(d.toFixed(2)); // round to 2 decimal places
+}
+
 
 export default {
 
     UserRegister: async (req: Request, res: Response) => {
         try {
-          const {  password, email } = req.body;
+          const {  password, email,deviceToken,deviceType } = req.body;
     // const image ='uploads\\bead2399-9898-4b74-9650-bf2facdaaafa.png'
           // Validate input
           if (!email || !password) {
@@ -51,18 +70,21 @@ export default {
           const newUser = await User.create({
         
             password: encryptedPassword,
-            email
+            email,
+            deviceToken,
+            deviceType
+
         
           });
     
           // Generate JWT token
           const token = jwt.sign(
             {
-              user_id: newUser.id,
+              id: newUser.id,
               email: newUser.email,
             },
             process.env.TOKEN_KEY as string,
-            { expiresIn: "2h" } // Token expiration time
+            // { expiresIn: "2h" } // Token expiration time
           );
     
           // Prepare response data
@@ -82,7 +104,8 @@ export default {
 
       UserLogin: async (req: Request, res: Response) => {
         try {
-            const { email, password } = req.body;
+            const { email, password ,deviceToken,
+            deviceType} = req.body;
             console.log(req.body, "BODY");
             
           
@@ -98,7 +121,8 @@ export default {
             if (!user) {
                 return res.status(400).json({ status: 0, message: "Invalid Email" });
             }
-         
+            user.deviceToken = deviceToken,
+            user.deviceType = deviceType         
             await user.save(); // Save the updated user object
     
             const isPasswordValid = await bcrypt.compare(password, user.password as unknown as string);
@@ -128,6 +152,7 @@ export default {
                     // mobilenumber: user.mobilenumber,
                     token: token,
                     image:user.image,
+                    iscompletedProfile:user.isCompletedProfile
     
     
                 },
@@ -138,47 +163,117 @@ export default {
             return res.status(500).json({ status: 0, message: "Internal server error" });
         }
     },
-    UserUpdate: async (req: Request, res: Response) => {
-        try {
-            // Get user_id from the request
-            const user_id = req.user?.id;
-            if (!user_id) {
-                return res.status(400).json({ message: 'User ID is missing or invalid' });
-            }
-    
-            // Get the updated user data from the request body
-            const { FirstName, email,dob,gender } = req.body;
-    
-    console.log(req.body,"boDY");
-    const image = req.file?.path; // Normalize path
-    
-            let user = await User.findByPk(user_id);
-    
-      
-    
-            if (!user) {
-                return res.status(404).json({ message: 'User not found' });
-            }
-    
-                // Update the user's information
-          user.FirstName = FirstName ?? user.FirstName;
-          user.email = email ?? user.email;
-          user.dob = dob ?? user.dob;
-          user.image= image ?? user.image
-          user.gender = gender ?? user.gender
-          // user.Interests = interests || user.Interests
+ UserUpdate: async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      console.log("User ID not found in request.");
+      return res.status(400).json({ status: 0, message: 'User ID not found' });
+    }
+
+    let { FirstName, email, dob, interests } = req.body;
+    const image = req.file?.path;
+
+    // Parse interests if it's a string (e.g. from multipart/form-data)
+    if (typeof interests === 'string') {
+      try {
+        interests = interests.split(',').map(item => item.trim());
+      } catch (e) {
+        console.warn("Failed to parse interests. Got:", interests);
+        interests = [];
+      }
+    }
+
+    // Clean and convert interests to numbers, removing invalid entries
+    if (Array.isArray(interests)) {
+      interests = interests
+        .map((item: string | number) => {
+          if (typeof item === 'string') {
+            // Remove any surrounding brackets or non-numeric chars
+            return parseInt(item.replace(/[\[\]]/g, ''), 10);
+          }
+          return item;
+        })
+        .filter((num: number) => !isNaN(num)); // Remove NaNs
+    } else {
+      interests = [];
+    }
+
+    console.log("Incoming data:", { FirstName, email, dob, interests, image });
+
+    const user = await User.findOne({ where: { id: userId } });
+    if (!user) {
+      console.log("User not found in database.");
+      return res.status(404).json({ status: 0, message: 'User not found' });
+    }
+
+    // Update user info
+    user.id = userId || user.id;
+    user.FirstName = FirstName || user.FirstName;
+    user.email = email || user.email;
+    user.image = image || user.image;
+    user.dob = dob || user.dob;
+    await user.save();
+    console.log("User profile updated successfully.");
+
+    if (interests.length > 0) {
+      console.log("Processing interests...");
+
+      // Step 1: Get existing interests
+      const existingInterests = await Interests.findAll({ where: { userId } });
+      const existingSubcategoryIds = existingInterests.map(i => i.subcategoryId);
+      console.log("Existing interests:", existingSubcategoryIds);
+
+      // Step 2: Filter new ones
+      const newUniqueInterests = interests
+        .filter((subcategoryId: number) => !existingSubcategoryIds.includes(subcategoryId))
+        .map((subcategoryId: number) => ({
+          subcategoryId,
+          userId,
+        }));
+
+      console.log("New unique interests to add:", newUniqueInterests);
+
+      // Step 3: Insert new interests
+      if (newUniqueInterests.length > 0) {
+        await Interests.bulkCreate(newUniqueInterests);
+        console.log("New interests inserted successfully.");
+      } else {
+        console.log("No new interests to add.");
+      }
+    } else {
+      console.log("No valid interests array provided.");
+    }
+
+    // Step 4: Fetch all updated interests
+    const updatedInterests = await Interests.findAll({ where: { userId } });
+    const updatedSubcategoryIds = updatedInterests.map(i => i.subcategoryId);
+    console.log("Final interests after update:", updatedSubcategoryIds);
+
+    return res.status(200).json({
+      status: 1,
+      message: 'Profile updated successfully',
+      data: {
+        id: user.id,
+        firstName: user.FirstName,
+        email: user.email,
+        image: user.image,
+        dateOfBirth: user.dob,
+        // interests: updatedSubcategoryIds,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+  }
+},
 
 
-          await user.save();
-    
-            // Return success response with the updated user data
-            res.json({ status:1,message: 'User updated successfully', user });
-    
-        } catch (error) {
-            console.error(error);
-            res.status(500).json({ message: 'Internal server error' });
-        }
-    },       
+
+
+
+       
     ChangePass: async (req: Request, res: Response) => {
         try {
             const { oldPassword, newPassword } = req.body;
@@ -306,10 +401,11 @@ export default {
         // Step 2: Generate OTP (Random token for password reset)
 
         // Generate a secure 6-digit OTP (reset token)
-        const generateResetToken = () => {
-            const token = randomBytes(3).toString('hex');  // Generate 3 random bytes (6 hexadecimal characters)
-            return token;
-        };
+            const generateResetToken = () => {
+  const token = Math.floor(100000 + Math.random() * 900000); // 6 digit number between 100000 and 999999
+  return token.toString();
+};
+
         
         // Generate expiration time for the token (10 minutes from now)
         const resetExpires = new Date(Date.now() + 10 * 60 * 1000); // OTP expiration in 10 minutes
@@ -411,6 +507,7 @@ export default {
     UpdatePassword: async (req: Request, res: Response) => {
       const { email, newPassword } = req.body;
     
+    
       try {
         const user = await User.findOne({ where: { email } });
     
@@ -444,6 +541,7 @@ export default {
     GetCategory: async (req: Request, res: Response) => {
       try {
         const categories = await Category.findAll();
+      
         if (categories.length === 0) { 
           return res.status(404).json({ status: 0, message: 'No categories found' });
         }
@@ -475,64 +573,84 @@ export default {
       }
     },
     CompleteProfile: async (req: Request, res: Response) => {
+  try {
+    const user_id = req.user?.id;
+
+    if (!user_id) {
+      return res.status(400).json({ message: 'User ID is missing or invalid' });
+    }
+
+    const { FirstName, gender, dob } = req.body;
+    const image = req.file?.path;
+
+    console.log(req.body, 'BODY>>>');
+
+    // Parse interests
+    let interestArray: number[] = [];
+    if (req.body.Interests) {
       try {
-        const user_id = req.user?.id;
-        if (!user_id) {
-          return res.status(400).json({ message: 'User ID is missing or invalid' });
+        interestArray = JSON.parse(req.body.Interests);
+        if (!Array.isArray(interestArray)) {
+          return res.status(400).json({ message: 'Interests should be a JSON array' });
         }
-    
-        const { FirstName, gender, dob } = req.body;
-        const image = req.file?.path;
-    
-        // 👇 Parse Interests from form-data
-        let interestArray: number[] = [];
-        if (req.body.Interests) {
-            interestArray = JSON.parse(req.body.Interests);
-            if (!Array.isArray(interestArray)) {
-              return res.status(400).json({ message: 'Interests should be a JSON array' });
-            }
-       
-        }
-    
-        const user = await User.findByPk(user_id);
-        if (!user) {
-          return res.status(404).json({ message: 'User not found' });
-        }
-    
-        // ✅ Basic profile update
-        user.FirstName = FirstName ?? user.FirstName;
-        user.gender = gender ?? user.gender;
-        user.dob = dob ?? user.dob;
-        user.image = image ??user.image;
-        user.isCompletedProfile = true;
-    
-        await user.save();
-    
-        // ✅ Handle Interests
-        if (interestArray.length > 0) {
-          // 1. Delete old interests
-          await Interests.destroy({ where: { userId: user_id } });
-    
-          // 2. Prepare and insert new interests
-          const newInterests = interestArray.map((subcategoryId: number) => ({
-            userId: (user_id), // 🔁 Ensure it's a number if needed
-            subcategoryId,
-          }));
-    
-          await Interests.bulkCreate(newInterests);
-          console.log("Interests added successfully", newInterests);
-        }
-    
-        return res.json({
-          status: 1,
-          message: 'User updated successfully',
-          user,
-        });
-      } catch (error) {
-        console.error('Error completing profile:', error);
-        return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+      } catch (parseError) {
+        return res.status(400).json({ message: 'Invalid format for Interests field' });
       }
-    },
+    }
+
+    const user = await User.findByPk(user_id, {
+      attributes: ['id', 'FirstName', 'image', 'dob', 'gender', 'isCompletedProfile'],
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Update user details
+    user.FirstName = FirstName ?? user.FirstName;
+    user.gender = gender ?? user.gender;
+    user.dob = dob ?? user.dob;
+    user.image = image ?? user.image;
+    user.isCompletedProfile = true;
+    await user.save();
+
+    // Append new interests without deleting old ones
+    if (interestArray.length > 0) {
+      // Fetch existing interests
+      const existingInterests = await Interests.findAll({ where: { userId: user_id } });
+      const existingSubcategoryIds = existingInterests.map(i => i.subcategoryId);
+
+      // Filter out only new interests
+      const newUniqueInterests = interestArray
+        .filter(subcategoryId => !existingSubcategoryIds.includes(subcategoryId))
+        .map(subcategoryId => ({
+          userId: user_id,
+          subcategoryId,
+        }));
+
+      // Insert new interests only
+      if (newUniqueInterests.length > 0) {
+        await Interests.bulkCreate(newUniqueInterests);
+        console.log('New interests added successfully:', newUniqueInterests);
+      } else {
+        console.log('No new interests to add.');
+      }
+    }
+
+    // Send final response
+    return res.json({
+      status: 1,
+      message: 'User updated successfully',
+      user: {
+        ...user.toJSON(),
+      },
+    });
+  } catch (error) {
+    console.error('Error completing profile:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+  }
+},
+
     GetProfile: async (req: Request, res: Response) => {
       try {
         const userId = req.user?.id;
@@ -543,10 +661,16 @@ export default {
     
         const user = await User.findOne({
           where: { id: userId },
+          attributes: ['id', 'FirstName', 'email', 'dob', 'image'],
           include: [
             {
               model: Interests,
               as: 'interests',
+                        attributes: {
+            exclude: ['createdAt', 'updatedAt']
+          },
+
+
               include: [
                 {
                   model: SubCategory,
@@ -555,6 +679,10 @@ export default {
                     {
                       model: Category,
                       as: 'category',
+                                attributes: {
+            exclude: ['createdAt', 'updatedAt']
+          },
+
                     }
                   ]
                 }
@@ -578,49 +706,135 @@ export default {
         return res.status(500).json({ status: 0, message: 'Internal Server Error' });
       }
     },
-    AddPost: async (req: Request, res: Response) => {
-      try {
-        const userId = req.user?.id;
-        if (!userId) {
-          return res.status(400).json({ message: 'User ID is missing or invalid' });
+   AddPost: async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is missing or invalid' });
+    }
+
+    const {
+      Title,
+      GroupSize,
+      Time,
+      Description,
+      Location,
+      subcategoryId,
+      Latitude,
+      Longitude,
+      IsOnRequest,
+      IsAddAutomatically,
+      isTodayOnly,
+      isAvailablenow,
+      ageRangeMax,
+      ageRangeMin,
+      endTime,
+      date
+    } = req.body;
+
+    console.log(req.body, "<<<<<body>>>>");
+
+    if (!date) {
+      return res.status(400).json({ message: 'Date is required' });
+    }
+
+    const image = req.file?.path;
+
+    const AddPost = await Post.create({
+      Title,
+      GroupSize,
+      Time,
+      Description,
+      Location,
+      subcategoryId,
+      Latitude,
+      Longitude,
+      userId,
+      image,
+      IsAddAutomatically,
+      IsOnRequest,
+      isTodayOnly,
+      isAvailablenow,
+      ageRangeMax,
+      ageRangeMin,
+      endTime,
+      date
+    });
+
+    console.log(AddPost, "ADD POST");
+
+    // 🔔 Send notification if isAvailablenow is true
+    if (isAvailablenow) {
+      const postLat = parseFloat(Latitude);
+      const postLng = parseFloat(Longitude);
+      const distanceKm = 15;
+
+      const distanceFormula = literal(`
+        6371 * acos(
+          cos(radians(${postLat})) * cos(radians(latitude)) *
+          cos(radians(longitude) - radians(${postLng})) +
+          sin(radians(${postLat})) * sin(radians(latitude))
+        )
+      `);
+
+      let users = await User.findAll({
+        where: {
+          showNowAvailable: true,
+          pushNotification:true,
+          [Op.and]: sequelize.where(distanceFormula, { [Op.lte]: distanceKm })
         }
-        const { Title, GroupSize, Time, Description, Location, subcategoryId, Latitude, Longitude,IsOnRequest,IsAddAutomatically,IsBosted} = req.body;
-        const image = req.file?.path; // Normalize path
+      });
 
-        console.log(req.body, "BODY");
-        console.log(userId, "USER ID");
-        const AddPost = await Post.create({
-          Title,
-          GroupSize,
-          Time,
-          Description,
-          Location,
-          subcategoryId,
-          Latitude,
-          Longitude,
-          userId,
-          image,
-          IsAddAutomatically,
-          IsOnRequest,
-          IsBosted
-        })
-         await Group.create({
-          createdBy: userId,
-          postId: AddPost.id,
-          maxSize: GroupSize, // Ensure GroupSize is defined and matches the required type
-   })
-        res.status(200).json({
-          status: 1,
-          message: 'Post added successfully',
-              
-        })
-
-      } catch (error) {
-        console.error('Error adding post:', error);
-        return res.status(500).json({ status: 0, message: 'Internal Server Error' });
-        
+      if (users.length === 0) {
+        users = await User.findAll({
+          where: {
+            pushNotification: true,
+            [Op.and]: sequelize.where(distanceFormula, { [Op.lte]: distanceKm })
+          }
+        });
       }
-    },
+
+  for (const user of users) {
+    await notificationQueue.add('send-now-available', {
+      userId: user.id,
+      title: 'Available Now!',
+      message: `${Title} is happening near you!`,
+      postId: AddPost.id.toString()
+    });
+  }
+
+      console.log(`✅ Notifications sent to ${users.length} users.`);
+    }
+
+    // 🕒 Calculate end time for group
+    let postEndAt: Date;
+
+    try {
+      postEndAt = new Date(new Date(AddPost.date).getTime() + 48 * 60 * 60 * 1000);
+    } catch (err) {
+      return res.status(400).json({ message: 'Invalid date format' });
+    }
+
+    // 📌 Create Group
+    await GroupMember.create({
+      createdBy: userId ?? '',
+      postId: AddPost.id,
+      maxSize: GroupSize,
+      endAt: postEndAt
+    });
+
+    res.status(200).json({
+      status: 1,
+      message: 'Post added successfully',
+      data: AddPost
+    });
+
+  } catch (error) {
+    console.error('Error adding post:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+  }
+},
+
     GetPost: async (req: Request, res: Response) => {
       try {
         const userId = req.user?.id;
@@ -628,12 +842,25 @@ export default {
           return res.status(400).json({ message: 'User ID is missing or invalid' });
         }
     
+        // User ka latitude aur longitude body se le rahe hain
+        const { latitude, longitude } = req.body;
+    
+        if (!latitude || !longitude) {
+          return res.status(400).json({ message: 'Latitude and Longitude are required' });
+        }
+    
+        const userLocation = {
+          lat: parseFloat(latitude),
+          lon: parseFloat(longitude),
+        };
+    
         const posts = await Post.findAll({
           where: { userId },
           include: [
             {
-              model: Group,
-              as: 'group', // must match Post.hasOne(GroupMember, { as: 'group' })
+                      model: GroupMember,
+          as: 'groupMembers', // ✅ Fixed alias
+
               attributes: ['members']
             }
           ]
@@ -643,13 +870,24 @@ export default {
           return res.status(404).json({ status: 0, message: 'No posts found' });
         }
     
-        // Transform data to include joinedCount
         const result = posts.map((post: any) => {
           const members = post.group?.members ?? [];
+    
+          // Post ki location
+          const postLocation = {
+            lat: parseFloat(post.Latitude),
+            lon: parseFloat(post.Longitude),
+          };
+    
+          // Distance calculate karenge (in meters), then convert to km
+          const distanceInMeters = haversine(userLocation, postLocation);
+          const distanceInKm = +(distanceInMeters / 1000).toFixed(2); // Rounded to 2 decimal places
+    
           return {
             ...post.toJSON(),
             joinedCount: members.length,
-            groupSize: post.GroupSize
+            groupSize: post.GroupSize,
+            distanceInKm
           };
         });
     
@@ -675,11 +913,14 @@ export default {
     
         // Find the post to be deleted
         const post = await Post.findOne({ where: { id: postId, userId } });
+
     
         if (!post) {
           return res.status(404).json({ status: 0, message: 'Post not found' });
         }
     
+        await GroupMember.destroy({ where: { postId } }); // Delete associated group members  
+
         // Delete the post
         await post.destroy();
     
@@ -691,73 +932,92 @@ export default {
         
       }
     },
-    UpdatePost:async(req: Request, res: Response) => {
-      try {
-        const userId = req.user?.id;
-        const postId = req.body.id; // Assuming you're passing post ID as a URL parameter
+
+UpdatePost: async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const postId = req.body.id;
+
+
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is missing or invalid' });
+    }
+
+    const post = await Post.findOne({ where: { id: postId, userId } });
+    if (!post) {
+      return res.status(404).json({ status: 0, message: 'Post not found' });
+    }
+
+    const group = await GroupMember.findOne({ where: { postId } });
+
+    const {
+      Title, GroupSize, Time, Description, Location, subcategoryId,
+      Latitude, Longitude, IsOnRequest, IsAddAutomatically,
+      isAvailablenow, isTodayOnly, ageRangeMax, ageRangeMin
+    } = req.body;
+    console.log(req.body, "BODY>>>"); 
     
-        if (!userId) {
-          return res.status(400).json({ message: 'User ID is missing or invalid' });
+
+    const image = req.file?.path;
+    console.log(image, "IMAGE PATH");
+    
+
+    // Update fields if provided
+    post.Title = Title ?? post.Title;
+    post.GroupSize = GroupSize ?? post.GroupSize;
+    post.Time = Time ?? post.Time;
+    post.Description = Description ?? post.Description;
+    post.Location = Location ?? post.Location;
+    post.subcategoryId = subcategoryId ?? post.subcategoryId;
+    post.Latitude = Latitude ?? post.Latitude;
+    post.Longitude = Longitude ?? post.Longitude;
+    post.image = image ?? post.image;
+    post.IsOnRequest = IsOnRequest ?? post.IsOnRequest;
+    post.IsAddAutomatically = IsAddAutomatically ?? post.IsAddAutomatically;
+    post.isAvailablenow = isAvailablenow ?? post.isAvailablenow;
+    post.isTodayOnly = isTodayOnly ?? post.isTodayOnly;
+    post.ageRangeMin = ageRangeMin ?? post.ageRangeMin;
+    post.ageRangeMax = ageRangeMax ?? post.ageRangeMax;
+
+    await post.save();
+
+    if (group?.members && Array.isArray(group.members)) {
+      for (const member of group.members) {
+        if (member.userId === group.createdBy) continue; // Skip creator
+
+        const user = await User.findOne({ where: { id: member.userId } });
+
+        if (user?.eventUpdate == true && user.pushNotification== true) {
+          // Create in-app notification
+          await Notification.create({
+            userId: user.id,
+            body: 'The host updated the Qes',
+            type: 'eventUpdate',
+            moduleId: post.id.toString(),
+            senderId: group.createdBy,
+            title: 'group update'
+          });
+
+          // Send push notification
+          await notificationQueue.add('send-event-update', {
+  userId: user.id,
+  title: 'Group Update',
+  message: 'The host updated the Qes',
+  postId: post.id.toString()
+});
+
         }
-    
-        // Find the post to be updated
-        const post = await Post.findOne({ where: { id: postId, userId } });
-    
-        if (!post) {
-          return res.status(404).json({ status: 0, message: 'Post not found' });
-        }
-        const group = await Group.findOne({ where: { postId } });
-
-    
-        // Update the post with new data
-        const { Title, GroupSize, Time, Description, Location, subcategoryId, Latitude, Longitude,IsOnRequest,IsAddAutomatically,IsBosted} = req.body;
-        const image = req.file?.path; // Normalize path
-    
-        post.Title = Title ?? post.Title;
-        post.GroupSize = GroupSize ?? post.GroupSize;
-        post.Time = Time ?? post.Time;
-        post.Description = Description ?? post.Description;
-        post.Location = Location ?? post.Location;
-        post.subcategoryId = subcategoryId ?? post.subcategoryId;
-        post.Latitude = Latitude ?? post.Latitude;
-        post.Longitude = Longitude ??post.Longitude;
-        post.image = image ?? post.image; // Update image only if provided
-        post.IsOnRequest = IsOnRequest ?? post.IsOnRequest;
-        post.IsAddAutomatically = IsAddAutomatically ?? post.IsAddAutomatically;
-        post.IsBosted = IsBosted ?? post.IsBosted;
-        await post.save();
-
-        if (group?.members && Array.isArray(group.members)) {
-          for (const member of group.members) {
-            const user = await User.findOne({ where: { id: member.userId } });
-    
-            if (user?.eventUpdate) {
-              // Assuming you have a Notification model or a function to send notifications
-              await Notification.create({
-                userId: user.id,
-                body: 'The host updated the Qes',
-                type: 'eventUpdate',
-                moduleId: post.id.toString(),
-                senderId:group.createdBy,
-                title:"group update"
-              });
-    
-              // Optionally, send a push notification too
-              // await sendPushNotification(user.deviceToken, 'The host updated the Qes');
-            }
-          }
-        }
-
-
-    
-        return res.status(200).json({ status: 1, message: 'Post updated successfully', data:post });
-        
-      } catch (error) {
-        console.error('Error updating post:', error);
-        return res.status(500).json({ status: 0, message: 'Internal Server Error' });
-        
       }
-    },
+    }
+
+    return res.status(200).json({ status: 1, message: 'Post updated successfully', data: post });
+
+  } catch (error) {
+    console.error('Error updating post:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+  }
+},
+
     JoinGroup: async (req: Request, res: Response) => {
       try {
         const { postId } = req.body;
@@ -773,7 +1033,7 @@ export default {
           return res.status(404).json({ status: 0, message: 'User not found' });
         }
     
-        const group = await Group.findOne({ where: { postId } });
+        const group = await GroupMember.findOne({ where: { postId } });
         if (!group) {
           return res.status(404).json({ status: 0, message: 'Group not found' });
         }
@@ -797,7 +1057,7 @@ export default {
     
         const isRequestRequired = Boolean(post.IsOnRequest);
         const memberStatus = isRequestRequired ? 'pending' : 'joined';
-        const newMember: MemberDetail = { userId, status: memberStatus };
+        const newMember: MemberDetail = { userId, status: memberStatus ,isArchive:true};
     
         const updatedMembers: MemberDetail[] = [...members, newMember];
         await group.update({ members: updatedMembers });
@@ -812,13 +1072,21 @@ export default {
             body: `${user.FirstName} wants to be added to the group`,
           });
         }
+           await notificationQueue.add('send-request-to-join', {
+            userId: post.userId,
+            title: 'Join Request',
+            message:`${user.FirstName} wants to be added to the group`,
+            postId: post.id.toString()
+          });
+
     
         return res.status(200).json({
-          status: 1,
-          message: isRequestRequired
-            ? 'Request sent to the group admin'
-            : 'Successfully joined the group',
-        });
+  status: isRequestRequired ? 1 : 2,
+  message: isRequestRequired
+    ? 'Request sent to the group admin'
+    : 'Successfully joined the group',
+});
+
     
       } catch (error) {
         console.error('Join Group Error:', error);
@@ -830,14 +1098,14 @@ export default {
     AcceptRequest: async (req: Request, res: Response) => {
       try {
         const userId = req.user?.id;
-        const { postId, memberId, action } = req.body; // action = 'accept' | 'reject'
+        const { id,postId, memberId, action } = req.body; // action = 'accept' | 'reject'
     
         if (!userId || !postId || !memberId || !action) {
           return res.status(400).json({ status: 0, message: 'Missing required fields' });
         }
     
         const membersData = await User.findOne({ where: { id: memberId } });
-        const group = await Group.findOne({ where: { postId } });
+        const group = await GroupMember.findOne({ where: { postId } });
     
         if (!group) {
           return res.status(404).json({ status: 0, message: 'Group not found for this post' });
@@ -850,6 +1118,8 @@ export default {
         const memberExists = group.members.some(
           (member: any) => member.userId === memberId && member.status === 'pending'
         );
+        console.log(memberExists, "MEMBER EXISTS");
+        
     
         if (!memberExists) {
           return res.status(404).json({ status: 0, message: 'Pending member not found' });
@@ -862,28 +1132,40 @@ export default {
             member.userId === memberId ? { ...member, status: 'joined' } : member
           );
         } else if (action === 'reject') {
-          // Option 1: Remove member entirely
           updatedMembers = group.members.filter((member: any) => member.userId !== memberId);
-    
-          // Option 2: Keep record and update status to 'rejected'
-          // updatedMembers = group.members.map((member: any) =>
-          //   member.userId === memberId ? { ...member, status: 'rejected' } : member
-          // );
         } else {
           return res.status(400).json({ status: 0, message: 'Invalid action type' });
         }
     
         await group.update({ members: updatedMembers });
     
-        const notificationType = action === 'accept' ? 'Accept Request' : 'Reject Request';
-        const notificationTitle =
-          action === 'accept' ? 'Group Join Request Accepted' : 'Group Join Request Rejected';
-        const notificationBody =
-          action === 'accept'
-            ? 'Group Admin has added you into the group'
-            : 'Your request to join the group has been rejected by the admin';
+        // Step 1: Set old "Join Request" notification isActive = false
+    // Step 1: Find the active join request notification
+const existingNotification = await Notification.findOne({
+  where: {
+    id:id
+  }
+});
+
+// Step 2: If found, set isActive to false and save
+if (existingNotification) {
+  existingNotification.isActive = false;
+  await existingNotification.save();
+  console.log("Old notification updated with isActive = false");
+} else {
+  console.log("No active join request notification found");
+}
+
     
-        // Instead of directly checking if membersData?.pushNotification is true, use a more explicit check
+        // Step 2: Create new notification if push notifications are enabled
+        const notificationType = action === 'accept' ? 'Accept Request' : 'Reject Request';
+        const notificationTitle = action === 'accept'
+          ? 'Group Join Request Accepted'
+          : 'Group Join Request Rejected';
+        const notificationBody = action === 'accept'
+          ? 'Group Admin has added you into the group'
+          : 'Your request to join the group has been rejected by the admin';
+    
         if (membersData?.pushNotification === true) {
           await Notification.create({
             type: notificationType,
@@ -891,24 +1173,40 @@ export default {
             senderId: userId,
             title: notificationTitle,
             body: notificationBody,
-            moduleId: postId
+            moduleId: postId,
+            isActive: true // Important to keep new notification active
           });
+           await notificationQueue.add('send-accept-request', {
+            userId: memberId,
+            title: notificationTitle,
+            message: notificationBody,
+            postId: postId.toString()
+          });
+
         }
     
         return res.status(200).json({
           status: 1,
-          message: `Member request ${action === 'accept' ? 'accepted' : 'rejected'} successfully`
+          message: `Member request ${action === 'accept' ? 'accepted' : 'rejected'} successfully`,
+          data:{
+            memberId,
+            postId
+          }
         });
+    
       } catch (error) {
         console.error('Error handling request:', error);
         return res.status(500).json({ status: 0, message: 'Internal Server Error' });
       }
     },
     
+    
 RemoveFromGroup: async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     const { postId, memberId } = req.body;
+    console.log(req.body,"BODY");
+    
 
     if (!userId) {
       return res.status(400).json({ message: 'User ID is missing or invalid' });
@@ -917,7 +1215,7 @@ RemoveFromGroup: async (req: Request, res: Response) => {
       id:memberId
     }})
 
-    const group = await Group.findOne({ where: { postId } });
+    const group = await GroupMember.findOne({ where: { postId } });
 
     if (!group) {
       return res.status(404).json({ status: 0, message: 'Group not found for this post' });
@@ -976,7 +1274,7 @@ LeftFromGroup: async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(400).json({ message: 'User ID is missing or invalid' });
     }
-    const group = await Group.findOne({ where: { postId } });
+    const group = await GroupMember.findOne({ where: { postId } });
     if (!group) {
       return res.status(404).json({ status: 0, message: 'Group not found for this post' });
     }
@@ -1026,7 +1324,7 @@ ReportMember: async (req: Request, res: Response) => {
     }
 
     // Find the group associated with the post
-    const group = await Group.findOne({ where: { postId } });
+    const group = await GroupMember.findOne({ where: { postId } });
 
     if (!group) {
       return res.status(404).json({ status: 0, message: 'Group not found for this post' });
@@ -1103,34 +1401,60 @@ AddcustomerService: async (req: Request, res: Response) => {
 HomePage: async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
-    const { latitude, longitude } = req.body; // User's current location
+    console.log(userId, "USER");
+
+    const Users = await User.findOne({ where: { id: userId } });
+
+    if (!Users) {
+      return res.status(404).json({ status: 0, message: 'User not found' });
+    }
+
+    const { latitude, longitude } = req.body;
+    console.log(req.body, "BODY");
+
 
     if (!userId || !latitude || !longitude) {
       return res.status(400).json({ message: 'User ID or location is missing' });
     }
 
+    const today = new Date().toISOString().split('T')[0];
+    console.log(today, "TODAY");
+
+    // Build age range condition only if user has valid age ranges
+    const ageRangeCondition = (Users.ageRangeMin !== null && Users.ageRangeMax !== null) 
+      ? sequelize.literal(`
+          (${Users.ageRangeMin} <= "Post"."ageRangeMax" AND ${Users.ageRangeMax} >= "Post"."ageRangeMin")
+        `)
+      : sequelize.literal('TRUE');
+
     const posts = await Post.findAll({
       where: {
-        userId: { [Op.ne]: userId},
-        [Op.and]: sequelize.literal(`
-
-          (
-            6371 * acos(
-              cos(radians(${latitude})) * cos(radians(latitude)) *
-              cos(radians(longitude) - radians(${longitude})) +
-              sin(radians(${latitude})) * sin(radians(latitude))
-            )
-          ) <= 50
-        `)
+        userId: { [Op.ne]: userId },
+        date: today,
+        [Op.and]: [
+          // Distance filter with proper casting
+          sequelize.literal(`
+            (
+              6371 * acos(
+                cos(radians(${parseFloat(latitude)})) * cos(radians(CAST("Post"."Latitude" AS FLOAT))) *
+                cos(radians(CAST("Post"."Longitude" AS FLOAT)) - radians(${parseFloat(longitude)})) +
+                sin(radians(${parseFloat(latitude)})) * sin(radians(CAST("Post"."Latitude" AS FLOAT)))
+              )
+            ) <= 15
+          `),
+          // Age range filter
+          ageRangeCondition,
+        ],
       },
       attributes: [
-        'id', 'Title', 'GroupSize', 'Location', 'Time', 'image',
+        'id', 'Title', 'GroupSize', 'Location', 'Time', 'image', 'ageRangeMin', 'ageRangeMax', 'isAvailablenow',
+        // Distance calculation with proper casting
         [sequelize.literal(`
           (
             6371 * acos(
-              cos(radians(${latitude})) * cos(radians(latitude)) *
-              cos(radians(longitude) - radians(${longitude})) +
-              sin(radians(${latitude})) * sin(radians(latitude))
+              cos(radians(${parseFloat(latitude)})) * cos(radians(CAST("Post"."Latitude" AS FLOAT))) *
+              cos(radians(CAST("Post"."Longitude" AS FLOAT)) - radians(${parseFloat(longitude)})) +
+              sin(radians(${parseFloat(latitude)})) * sin(radians(CAST("Post"."Latitude" AS FLOAT)))
             )
           )
         `), 'distance']
@@ -1138,37 +1462,76 @@ HomePage: async (req: Request, res: Response) => {
       include: [
         {
           model: GroupMember,
-          as: 'group',
-          attributes: ['members'],
+          as: 'groupMembers',
+          where: {
+            endAt: { [Op.gte]: new Date(today) }
+          },
+          required: true,
+          attributes: ['members', 'endAt'],
         },
         {
           model: User,
           as: 'user',
-          attributes: ['id', 'FirstName', 'image'],
+          attributes: ['id', 'FirstName', 'image', 'showNowAvailable'],
         },
       ],
-      order: sequelize.literal('distance ASC'),
+      order: [
+        ['isAvailablenow', 'DESC'],
+        // Distance ordering with proper casting
+        [sequelize.literal(`
+          (
+            6371 * acos(
+              cos(radians(${parseFloat(latitude)})) * cos(radians(CAST("Post"."Latitude" AS FLOAT))) *
+              cos(radians(CAST("Post"."Longitude" AS FLOAT)) - radians(${parseFloat(longitude)})) +
+              sin(radians(${parseFloat(latitude)})) * sin(radians(CAST("Post"."Latitude" AS FLOAT)))
+            )
+          )
+        `), 'ASC']
+      ]
     });
 
     const result = posts.map((post: any) => {
-      const members = post.group?.members ?? [];
-      const isJoined = members.some((member: any) => member.userId === userId);
-      const distance = parseFloat(post.get('distance')).toFixed(1); // in km
-      // const timeAgo = dayjs(post.Time).fromNow(); // e.g. "58 minutes ago"
+      const groupMemberEntries = post.groupMembers ?? [];
+
+      let isJoined = 1;
+      let joinedCount = 0;
+
+      groupMemberEntries.forEach((gm: any) => {
+        if (Array.isArray(gm.members)) {
+          gm.members.forEach((m: any) => {
+            if (m.userId === String(userId)) {
+              if (m.status === 'pending') {
+                isJoined = 3;
+              } else {
+                isJoined = 2;
+              }
+            }
+            joinedCount++;
+          });
+        }
+      });
+
+      // Safely handle distance calculation
+      const distanceValue = post.get('distance');
+      const distance = distanceValue ? parseFloat(distanceValue).toFixed(1) : '0.0';
 
       return {
-        ...post.toJSON(),
-        joinedCount: members.length,
-        groupSize: post.GroupSize,
-        isJoined,
+        id: post.id,
+        Title: post.Title,
+        GroupSize: post.GroupSize,
+        Location: post.Location,
+        Time: post.Time,
+        image: post.image,
+        ageRangeMin: post.ageRangeMin,
+        ageRangeMax: post.ageRangeMax,
+        isAvailablenow: post.isAvailablenow,
         distance: `${distance} km`,
-        // timeAgo,
+        isJoined,
+        joinedCount,
+        groupSize: post.GroupSize,
+        user: post.user,
       };
     });
-
-    if (result.length === 0) {
-      return res.status(404).json({ status: 0, message: 'No posts found within 50km' });
-    }
 
     return res.status(200).json({ status: 1, message: 'Posts retrieved successfully', data: result });
 
@@ -1177,87 +1540,125 @@ HomePage: async (req: Request, res: Response) => {
     return res.status(500).json({ status: 0, message: 'Internal Server Error' });
   }
 },
-PostDetails: async (req:Request,res:Response) =>{
+
+
+
+
+
+PostDetails: async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
-    const { latitude, longitude,id} = req.body; // User's current location
+    const { latitude, longitude, id } = req.body;
 
     const posts = await Post.findAll({
       where: {
-        id:id,
+        id: id,
         [Op.and]: sequelize.literal(`
-
           (
             6371 * acos(
-              cos(radians(${latitude})) * cos(radians(latitude)) *
-              cos(radians(longitude) - radians(${longitude})) +
-              sin(radians(${latitude})) * sin(radians(latitude))
+              cos(radians(${latitude})) * cos(radians(CAST("Post"."Latitude" AS DECIMAL))) *
+              cos(radians(CAST("Post"."Longitude" AS DECIMAL)) - radians(${longitude})) +
+              sin(radians(${latitude})) * sin(radians(CAST("Post"."Latitude" AS DECIMAL)))
             )
           ) <= 50
-        `)
+        `),
       },
       attributes: [
-        'id', 'Title', 'GroupSize', 'Location', 'Time', 'image','Description',
+        'id', 'Title', 'GroupSize', 'Location', 'Time', 'image', 'Description', 'date',
         [sequelize.literal(`
           (
             6371 * acos(
-              cos(radians(${latitude})) * cos(radians(latitude)) *
-              cos(radians(longitude) - radians(${longitude})) +
-              sin(radians(${latitude})) * sin(radians(latitude))
+              cos(radians(${latitude})) * cos(radians(CAST("Post"."Latitude" AS DECIMAL))) *
+              cos(radians(CAST("Post"."Longitude" AS DECIMAL)) - radians(${longitude})) +
+              sin(radians(${latitude})) * sin(radians(CAST("Post"."Latitude" AS DECIMAL)))
             )
           )
-        `), 'distance']
+        `), 'distance'],
       ],
       include: [
         {
           model: GroupMember,
-          as: 'group',
+          as: 'groupMembers',
           attributes: ['members'],
         },
         {
           model: User,
           as: 'user',
-          attributes: ['id', 'FirstName', 'image'],
+          attributes: ['id', 'FirstName', 'image', 'showNowAvailable'],
         },
       ],
       order: sequelize.literal('distance ASC'),
     });
 
     const result = posts.map((post: any) => {
-      const members = post.group?.members ?? [];
-      const isJoined = members.some((member: any) => member.userId === userId);
-      const distance = parseFloat(post.get('distance')).toFixed(1); // in km
-      // const timeAgo = dayjs(post.Time).fromNow(); // e.g. "58 minutes ago"
+      let members = post.groupMembers?.map((gm: any) => gm.members).flat();
+
+      if (typeof members === 'string') {
+        try {
+          members = JSON.parse(members);
+        } catch {
+          members = [];
+        }
+      }
+
+      members = Array.isArray(members) ? members : [];
+
+      let isJoined = 1; // default: not joined
+
+      for (const member of members) {
+        if (member.userId === userId) {
+          isJoined = member.status === 'pending' ? 3 : 2;
+          break;
+        }
+      }
 
       return {
-        ...post.toJSON(),
+        id: post.id,
+        Title: post.Title,
+        GroupSize: post.GroupSize,
+        Location: post.Location,
+        Time: post.Time,
+        date: post.date,
+        image: post.image,
+        Description: post.Description,
+        distance: `${parseFloat(post.get('distance')).toFixed(1)} km`,
+        isJoined,
         joinedCount: members.length,
         groupSize: post.GroupSize,
-        isJoined,
-        distance: `${distance} km`,
-        // timeAgo,
+        user: post.user,
       };
     });
 
-    if (result.length === 0) {
-      return res.status(404).json({ status: 0, message: 'No posts found within 50km' });
-    }
-
-    return res.status(200).json({ status: 1, message: 'Posts retrieved successfully', data: result });
-
+    return res.status(200).json({ status: 1, message: "Post detail Fetched", data: result });
 
   } catch (error) {
-    console.error("post details Error:", error);
-    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
-
-    
+    console.error("Post details Error:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
-},
+}
+,
 MapData: async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
+
+    const UserRangeinKm = await User.findOne({
+      where: { id: userId }
+    });
+
+    if (!UserRangeinKm) {
+      return res.status(404).json({ status: 0, message: 'User not found' });
+    }
+
     const { latitude, longitude } = req.body;
-    const range = 50; // fixed to 5 km
+    const range = UserRangeinKm?.maxDistanceKm || 15;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({ status: 0, message: 'Latitude and longitude are required' });
+    }
+
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    const rangeNum = Number(range);
 
     const posts = await Post.findAll({
       where: {
@@ -1265,47 +1666,73 @@ MapData: async (req: Request, res: Response) => {
         [Op.and]: sequelize.literal(`
           (
             6371 * acos(
-              cos(radians(${latitude})) * cos(radians(latitude)) *
-              cos(radians(longitude) - radians(${longitude})) +
-              sin(radians(${latitude})) * sin(radians(latitude))
+              cos(radians(${lat})) * cos(radians(CAST("Post"."Latitude" AS FLOAT))) *
+              cos(radians(CAST("Post"."Longitude" AS FLOAT)) - radians(${lng})) +
+              sin(radians(${lat})) * sin(radians(CAST("Post"."Latitude" AS FLOAT)))
             )
-          ) <= ${range}
+          ) <= ${rangeNum}
         `)
       },
       attributes: [
-        'id', 'Title', 'Location', 'image',
+        'id', 'Title', 'Location', 'image', 'Latitude', 'Longitude',
         [sequelize.literal(`
           (
             6371 * acos(
-              cos(radians(${latitude})) * cos(radians(latitude)) *
-              cos(radians(longitude) - radians(${longitude})) +
-              sin(radians(${latitude})) * sin(radians(latitude))
+              cos(radians(${lat})) * cos(radians(CAST("Post"."Latitude" AS FLOAT))) *
+              cos(radians(CAST("Post"."Longitude" AS FLOAT)) - radians(${lng})) +
+              sin(radians(${lat})) * sin(radians(CAST("Post"."Latitude" AS FLOAT)))
             )
           )
         `), 'distance']
       ],
+      include: [
+        {
+          model: GroupMember,
+          as: 'groupMembers',
+          required: false,
+          attributes: ['members'],
+        }
+      ],
       order: [[sequelize.literal('distance'), 'ASC']],
     });
 
-    // Use forEach instead of map, since the result is not being used.
-    posts.forEach((post: any) => {
-      const members = post.group?.members ?? [];
-      const isJoined = members.some((member: any) => member.userId === userId);
-      const distance = parseFloat(post.get('distance')).toFixed(1); // in km
-      // const timeAgo = dayjs(post.Time).fromNow(); // e.g. "58 minutes ago"
-      post.dataValues = {
-        ...post.dataValues,
-        joinedCount: members.length,
-        groupSize: post.GroupSize,
-        isJoined,
+    const result = posts.map((post: any) => {
+      const groupMemberEntries = post.groupMembers ?? [];
+      let isJoined = false;
+      let joinedCount = 0;
+
+      groupMemberEntries.forEach((gm: any) => {
+        if (Array.isArray(gm.members)) {
+          gm.members.forEach((m: any) => {
+            if (m.userId === String(userId)) {
+              isJoined = true;
+            }
+            joinedCount++;
+          });
+        }
+      });
+
+      const distanceValue = post.get('distance');
+      const distance = distanceValue ? parseFloat(distanceValue).toFixed(1) : '0.0';
+
+      return {
+        id: post.id,
+        Title: post.Title,
+        Location: post.Location,
+        image: post.image,
+        latitude: post.Latitude,
+        longitude: post.Longitude,
         distance: `${distance} km`,
+        isJoined,
+        joinedCount,
+        groupSize: post.GroupSize,
       };
     });
 
     return res.json({
       status: 1,
       message: "Nearby posts fetched successfully",
-      data: posts,
+      data: result,
     });
 
   } catch (error) {
@@ -1313,6 +1740,7 @@ MapData: async (req: Request, res: Response) => {
     return res.status(500).json({ status: 0, message: 'Internal Server Error' });
   }
 }
+
 ,
 
 postGroupDetails: async (req: Request, res: Response) => {
@@ -1344,6 +1772,7 @@ postGroupDetails: async (req: Request, res: Response) => {
     res.status(500).json({ status: 0, message: "Internal Server Error" });
   }
 },
+
 GetSettingNotification: async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -1367,7 +1796,8 @@ GetSettingNotification: async (req: Request, res: Response) => {
         'ageRangeMax',
         'pushNotification',
         'eventUpdate',
-        'memories'
+        'memories',
+        "showNowAvailable",
       ]
     });
 
@@ -1402,6 +1832,8 @@ UpdateSettingNotification: async (req: Request, res: Response) => {
       inAppVibration,
       inAppSound,
       latitude,
+      showNowAvailable,
+
       longitude,
       minDistanceKm,
       maxDistanceKm,
@@ -1411,6 +1843,7 @@ UpdateSettingNotification: async (req: Request, res: Response) => {
       eventUpdate,
       memories,
     } = req.body;
+console.log(req.body,"BODY");
 
     // Find the user by primary key (id)
     let user = await User.findByPk(id);
@@ -1428,14 +1861,17 @@ UpdateSettingNotification: async (req: Request, res: Response) => {
     user.longitude = longitude ?? user.longitude;
     user.maxDistanceKm = maxDistanceKm ?? user.maxDistanceKm;
     user.minDistanceKm = minDistanceKm ?? user.minDistanceKm;
-    user.ageRangemax = ageRangeMax ?? user.ageRangemax;
+    user.ageRangeMax = ageRangeMax ?? user.ageRangeMax;
     user.ageRangeMin = ageRangeMin ?? user.ageRangeMin;
     user.pushNotification = pushNotification ?? user.pushNotification;
     user.eventUpdate = eventUpdate ?? user.eventUpdate;
     user.memories = memories ?? user.memories;
+    user.showNowAvailable = showNowAvailable ?? user.showNowAvailable;
 
     // Save updated user settings
     await user.save();
+    console.log(user,"USER");
+    
 
     // Return success response
     res.json({ status: 1, message: 'Notification settings updated successfully' });
@@ -1447,23 +1883,44 @@ UpdateSettingNotification: async (req: Request, res: Response) => {
     return res.status(500).json({ status: 0, message: 'Internal Server Error' });
   }
 },
-GetNotification :async (req:Request,res:Response)=>{
+GetNotification: async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id
-    const GetNotification = await Notification.findAll({
-      where:{
-        userId:userId
-      }
-    })
-    res.json({status:1,message:"Notification get successfully",data:GetNotification})
-  } catch (error) {
-    console.error('Error updating notification settings:', error);
+    const userId = req.user?.id;
 
-    // Return a generic error message, while sending the error message to logs
+    // Pehle saare notifications la lo
+    const notifications = await Notification.findAll({
+      where: {
+        userId: userId,
+        isActive: true //
+      },
+      order: [['createdAt', 'DESC']] // Add this line
+
+    });
+
+    const updatedNotifications = await Promise.all(
+      notifications.map(async (notification) => {
+        // Sender ki detail lao
+        const sender = await User.findOne({
+          where: { id: notification.senderId },
+          attributes: ['image','FirstName']
+        });
+
+        return {
+          ...notification.toJSON(), 
+          senderImage: sender?.image || null ,
+          senderName: sender?.FirstName || null,
+        };
+      })
+    );
+
+    res.json({ status: 1, message: "Notification fetched successfully", data: updatedNotifications });
+
+  } catch (error) {
+    console.error('Error getting notifications:', error);
     return res.status(500).json({ status: 0, message: 'Internal Server Error' });
-    
   }
 },
+
 GetAllSubcategory:async (req:Request,res:Response) =>{
   try {
     const GetAllSubcategory = await SubCategory.findAll({attributes:['id','Name','image','category_id']})
@@ -1475,7 +1932,436 @@ GetAllSubcategory:async (req:Request,res:Response) =>{
     // Return a generic error message, while sending the error message to logs
     return res.status(500).json({ status: 0, message: 'Internal Server Error' });
   }
+  
+
+
+},
+GetMyProfile: async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(400).json({ status: 0, message: 'User ID not found' });
+    }
+
+    // Get User basic data
+    const user = await User.findOne({
+      where: { id: userId },
+      attributes: ['FirstName', 'email', 'image', 'dob']
+    });
+
+    if (!user) {
+      return res.status(404).json({ status: 0, message: 'User not found' });
+    }
+
+    // Get all user interests (subcategoryId)
+    const userInterests = await Interests.findAll({
+      where: { userId },
+      attributes: ['subcategoryId']
+    });
+
+    const subcategoryIds = userInterests.map((interest) => interest.subcategoryId);
+
+    if (subcategoryIds.length === 0) {
+      return res.status(200).json({
+        status: 1,
+        data: {
+          firstName: user.FirstName,
+          email: user.email,
+          profileImage: user.image,
+          dateOfBirth: user.dob,
+          interests: []
+        }
+      });
+    }
+
+    // Fetch Subcategories along with their Categories
+    const subcategories = await SubCategory.findAll({
+      where: { id: subcategoryIds },
+      include: [
+        {
+          model: Category,
+          as: 'Category', // IMPORTANT: use alias if association has alias
+          attributes: ['id', 'Name']
+        }
+      ],
+      attributes: ['id', 'Name', 'image', 'category_id']
+    });
+
+    // Organize by category
+    const interestsMap: { [key: number]: any } = {};
+
+    subcategories.forEach((subcat: any) => {
+      const categoryId = subcat.category_id;
+      const categoryName = subcat.Category?.Name || '';
+
+      if (!interestsMap[categoryId]) {
+        interestsMap[categoryId] = {
+          categoryId,
+          categoryName,
+          subcategories: []
+        };
+      }
+
+      interestsMap[categoryId].subcategories.push({
+        subcategoryId: subcat.id,
+        name: subcat.Name,
+        image: subcat.image
+      });
+    });
+
+    const interestsArray = Object.values(interestsMap);
+
+    // Final response
+    return res.status(200).json({
+      status: 1,
+      data: {
+        firstName: user.FirstName,
+        email: user.email,
+        profileImage: user.image,
+        dateOfBirth: user.dob,
+        interests: interestsArray
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+  }
+},
+
+CancelPost: async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const postId = req.body.id;
+
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is missing or invalid' });
+    }
+
+    // Find the post
+    const post = await Post.findOne({ where: { id: postId } });
+    if (!post) {
+      return res.status(404).json({ status: 0, message: 'Post not found' });
+    }
+
+    // Find the associated group
+    const group = await GroupMember.findOne({ where: { postId } });
+    if (!group) {
+      return res.status(404).json({ status: 0, message: 'Group not found for this post' });
+    }
+
+    // Only group creator can cancel
+    if (group.createdBy !== userId) {
+      return res.status(403).json({ status: 0, message: 'Only the group creator can cancel the post' });
+    }
+
+    // Notify group members
+    if (Array.isArray(group.members)) {
+      for (const member of group.members) {
+        const user = await User.findOne({ where: { id: member.userId } });
+        if (!user) continue; // Skip if user not found
+
+        // Send notification (excluding self if desired)
+      const sendPushNotification = await Notification.create({
+          userId: user.id,
+          body: 'The host cancelled the Qes',
+          type: 'eventUpdate',
+          moduleId: post.id.toString(),
+          senderId: group.createdBy,
+          title: 'Group Update',
+        });
+        console.log(sendPushNotification,"SEND PUSH NOTIFICATION");
+        
+        // Optional: Push notification logic
+        // await sendPushNotification(user.deviceToken, 'The host cancelled the Qes');
+      }
+    }
+
+    // Delete the post and group
+    await post.destroy();
+    await group.destroy();
+
+    return res.status(200).json({ status: 1, message: 'Post cancelled successfully' });
+
+  } catch (error) {
+    console.error('Error cancelling post:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+  }
+},
+ArchiveGroup:async(req:Request,res:Response)=>{
+   try {
+    const userId = req.user?.id;
+
+    // End of today to include today in comparison
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    // Fetch expired groups with the associated post
+    const expiredGroups = await GroupMember.findAll({
+      where: {
+        endAt: {
+          [Op.lte]: endOfToday, // Group's end date is today or before
+        },
+      },
+       include: [
+    {
+      model: Post,
+      as: 'post', // Make sure the alias matches
+      required: true, // Ensures you only get groups with associated posts
+    },
+  ],
+    });
+
+    console.log(expiredGroups, "<<<<<EXPIRES>>>>");
+
+    res.status(200).json({ status: 1,messaege:"Archive Group get succesfully", data: expiredGroups });
+  } catch (error) {
+    console.error('Error fetching archived groups:', error);
+    res.status(500).json({ status: 0, message: 'Something went wrong' });
+  }
+
+
+},
+RecreateGroupFromArchive: async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.json({ status: 0, message: "User not found" });
+    }
+
+    const {
+      oldPostId,
+      Title,
+      GroupSize,
+      Time,
+      Description,
+      Location,
+      subcategoryId,
+      Latitude,
+      Longitude,
+      IsOnRequest,
+      IsAddAutomatically,
+      isTodayOnly,
+      isAvailablenow,
+      ageRangeMax,
+      ageRangeMin,
+      endTime,
+      date
+    } = req.body;
+
+    if (!oldPostId || !date) {
+      return res.status(400).json({ status: 0, message: 'oldPostId and date are required' });
+    }
+
+    const image = req.file?.path;
+
+    // 1. Get old group for members
+    const oldGroup = await GroupMember.findOne({ where: { postId: oldPostId } });
+    if (!oldGroup) {
+      return res.status(404).json({ status: 0, message: 'Archived group not found' });
+    }
+
+    // 2. Create new post
+    const newPost = await Post.create({
+      Title,
+      GroupSize,
+      Time,
+      Description,
+      Location,
+      subcategoryId,
+      Latitude,
+      Longitude,
+      userId,
+      IsOnRequest,
+      IsAddAutomatically,
+      isTodayOnly,
+      isAvailablenow,
+      ageRangeMax,
+      ageRangeMin,
+      endTime,
+      date,
+      image
+    });
+
+    // 3. Calculate endAt (48 hours after post date)
+    const endAt = new Date(new Date(date).getTime() + 48 * 60 * 60 * 1000);
+
+    // 4. Filter members with status 'joined'
+    const joinedMembers = oldGroup.members.filter((member: any) => member.status === 'joined');
+    const joinedUserIds = joinedMembers.map((member: any) => member.userId);
+
+    // 5. Create new group with only joined members
+    const newGroup = await GroupMember.create({
+      createdBy: userId,
+      postId: newPost.id,
+      maxSize: GroupSize,
+      endAt,
+      members: joinedMembers
+    });
+
+    // 6. Send response with simplified members
+    res.status(200).json({
+      status: 1,
+      message: 'New post and group created with same members',
+      data: {
+        newPost,
+        newGroup: {
+          ...newGroup.toJSON(),
+          members: joinedUserIds
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error recreating group:', error);
+    res.status(500).json({ status: 0, message: 'Internal Server Error' });
+  }
+},
+DeleteInterests: async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const  subcategoryId = req.body.subcategoryId;
+
+    if (!userId || !subcategoryId) {
+      return res.status(400).json({ status: 0, message: 'User ID or subcategory ID is missing' });
+    }
+
+    // Check if the interest exists
+    const interest = await Interests.findOne({
+      where: { userId, subcategoryId }
+    });
+
+    if (!interest) {
+      return res.status(404).json({ status: 0, message: 'Interest not found' });
+    }
+
+    // Delete the interest
+    await interest.destroy();
+
+    return res.status(200).json({ status: 1, message: 'Interest deleted successfully' });
+    
+  } catch (error) {
+    console.error('Error deleting interests:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+
+    
+  }
+},
+RecentQess: async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { latitude, longitude } = req.body;
+
+    if (!userId || latitude === undefined || longitude === undefined) {
+      return res.status(400).json({ status: 0, message: 'User ID or location is missing' });
+    }
+
+    // GroupMember logic same as before
+    const groupMemberRecords = await GroupMember.findAll({
+      order: [['createdAt', 'DESC']],
+      attributes: ['postId', 'members'],
+      limit: 1
+    });
+
+    const joinedPostIds: number[] = [];
+    for (const record of groupMemberRecords) {
+      const members = record.members || [];
+      const matchedMember = members.find((m: any) =>
+        m.userId === userId && m.status === 'joined' && m.isArchive === false
+      );
+      if (matchedMember) {
+        joinedPostIds.push(record.postId);
+      }
+    }
+
+    // ✅ Step 1: Get posts (without association)
+    const recentQes = await Post.findAll({
+      where: {
+        [Op.or]: [
+          { userId },
+          { id: { [Op.in]: joinedPostIds } }
+        ]
+      },
+      order: [['createdAt', 'DESC']],
+      limit: 10,
+      attributes: ['id', 'Title', 'GroupSize', 'Location', 'Time', 'image', 'date', 'Latitude', 'Longitude', 'userId']
+    });
+
+    if (recentQes.length === 0) {
+      return res.status(404).json({ status: 0, message: 'No recent Qes found' });
+    }
+
+    // ✅ Step 2: Get all userIds from posts
+    const userIds = [...new Set(recentQes.map(post => post.userId))];
+
+    // ✅ Step 3: Get users and build a map
+    const users = await User.findAll({
+      where: { id: { [Op.in]: userIds } },
+      attributes: ['id', 'image']
+    });
+
+    const userImageMap: Record<string, string> = {};
+    users.forEach(user => {
+      userImageMap[user.id] = user.image;
+    });
+
+    // ✅ Step 4: Enrich post data
+const enrichedQes = recentQes.map(post => {
+  const distanceInKm = getDistanceFromLatLonInKm(
+    latitude,
+    longitude,
+    Number(post.Latitude),
+    Number(post.Longitude)
+  );
+
+  // Find related group members for this post
+  const gmEntry = groupMemberRecords.find(gm => gm.postId === post.id);
+
+  let isJoined = 1; // 1 = not joined, 2 = joined, 3 = pending
+  let joinedCount = 0;
+
+  if (gmEntry && Array.isArray(gmEntry.members)) {
+    gmEntry.members.forEach((m: any) => {
+      if (m.status === 'joined') {
+        joinedCount++;
+      }
+
+      if (m.userId === String(userId)) {
+        if (m.status === 'pending') {
+          isJoined = 3;
+        } else if (m.status === 'joined') {
+          isJoined = 2;
+        }
+      }
+    });
+  }
+
+  return {
+    ...post.toJSON(),
+    distanceInKm,
+    creatorImage: userImageMap[post.userId] || null,
+    isJoined,
+    joinedCount
+  };
+});
+
+
+    return res.status(200).json({
+      status: 1,
+      message: 'Recent Qes fetched successfully',
+  data: enrichedQes[0] || null  // single object
+    });
+
+  } catch (error) {
+    console.error('Error fetching recent Qes:', error);
+    return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+  }
+}
+
+
+
 
 
 }
-}
+

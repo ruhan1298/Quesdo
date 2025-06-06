@@ -5,6 +5,7 @@ import { sequelize } from '../../model/index';
 interface MemberDetail {
   userId: string;
   status: 'pending' | 'joined';
+  isArchive:boolean
 }
 
 interface GroupMemberAttributes {
@@ -13,6 +14,8 @@ interface GroupMemberAttributes {
   createdBy: string;
   members?: MemberDetail[];
   maxSize: number;
+  endAt?:Date
+  isArchive?:boolean
 }
 
 class GroupMember extends Model<GroupMemberAttributes> implements GroupMemberAttributes {
@@ -21,6 +24,8 @@ class GroupMember extends Model<GroupMemberAttributes> implements GroupMemberAtt
   createdBy!: string;
   members!: MemberDetail[];
   maxSize!: number;
+  endAt!:Date
+  isArchive?: boolean ;
 }
 
 GroupMember.init(
@@ -47,11 +52,21 @@ GroupMember.init(
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    endAt:{
+      type:DataTypes.DATE,
+      allowNull:true
+    },
+    isArchive:{
+      type:DataTypes.BOOLEAN,
+      defaultValue:true
+  
+    }
   },
   {
     sequelize,
     modelName: 'GroupMember',
   }
 );
+
 
 export default GroupMember;

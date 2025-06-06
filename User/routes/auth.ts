@@ -3,6 +3,7 @@ const router: Router = express.Router();
 import UserController from '../../User/controller/user';
 import upload from '../../middleware/upload';
 import UserAuth from '../../middleware/UserAuth';
+import user from '../../User/controller/user';
 router.post("/register", (req: Request, res: Response) => {
     UserController.UserRegister(req, res);
   });
@@ -52,7 +53,7 @@ router.post("/register", (req: Request, res: Response) => {
   
       UserController.GetSubcategory(req, res);
     })
-    router.post("/complete-profile",upload.single('image'), UserAuth,(req: Request, res: Response) => {
+    router.post("/complete-profile",UserAuth,upload.single('image'), UserAuth,(req: Request, res: Response) => {
   
   
       UserController.CompleteProfile(req, res);
@@ -97,6 +98,7 @@ router.post("/register", (req: Request, res: Response) => {
       UserController.AcceptRequest(req, res);
     })
     router.post("/remove-member",UserAuth,(req: Request, res: Response) => {
+      UserController.RemoveFromGroup(req, res);  
   
   
     })
@@ -145,14 +147,53 @@ router.post("/report",UserAuth,(req: Request, res: Response) => {
       })
       router.post("/get-notification",UserAuth,(req: Request, res: Response) => {
     
+
     
         UserController.GetNotification(req, res);
       })
+      router.post("/update-notification",UserAuth,(req: Request, res: Response) => {
+    
+
+    
+        UserController.UpdateSettingNotification(req, res);
+      })
+
 
       router.post("/getall-subcategory",UserAuth,(req: Request, res: Response) => {
     
     
         UserController.GetAllSubcategory(req, res);
       })
+      router.post("/getmy-profile",UserAuth,(req: Request, res: Response) => {
+    
+    
+        UserController.GetMyProfile(req, res);
+      })
+      router.post("/cancel-post",UserAuth,(req: Request, res: Response) => {
+    
+    
+        UserController.CancelPost(req, res);
+      })
+
+            router.post("/Archive-list",UserAuth,(req: Request, res: Response) => {
+    
+    
+        UserController.ArchiveGroup(req, res);
+      })
+          router.post("/reopen-post",upload.single('image'),UserAuth,(req: Request, res: Response) => {
+    
+    
+        UserController.RecreateGroupFromArchive(req, res);
+      })
+
+      router.post("/delete-interests",UserAuth,(req: Request, res: Response) => {
+    
+    
+        UserController.DeleteInterests(req, res);
+      })
+      router.post("/recent-qess",UserAuth,(req: Request, res: Response) => {
+        UserController.RecentQess(req, res);
+      })
+
 
 export default router

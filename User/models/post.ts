@@ -16,7 +16,14 @@ GroupSize?: number;
     IsAddAutomatically?: boolean;
     IsOnRequest?: boolean;
   IsBosted?: boolean;
+  isAvailablenow?: boolean;
   image?: string;
+  isTodayOnly?:boolean
+  ageRangeMax?:number
+ageRangeMin?:number
+    status?:'active' | 'archived' | 'closed'
+endTime?:string
+date?:Date
 
  
 
@@ -41,6 +48,15 @@ class Post extends Model<PostAttributes > {
     subcategoryId!: number;
     userId!: string;
     image!: string;
+    isAvailablenow!: boolean;
+    isTodayOnly!:boolean
+    ageRangeMax!:number
+ageRangeMin!:number
+  
+    status!:'active' | 'archived' | 'closed'
+
+    endTime!:string
+    date!:Date
   
 
     // role!:string;
@@ -116,6 +132,40 @@ Post.init(
         type: DataTypes.STRING,
         allowNull: true,
       },
+      isAvailablenow: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        defaultValue: false, // Default value for IsBosted
+      },
+      isTodayOnly:{
+        type:DataTypes.BOOLEAN,
+        allowNull:true,
+        defaultValue:false
+
+      },
+      ageRangeMin:{
+        type:DataTypes.INTEGER,
+        allowNull:true,
+
+      },
+      ageRangeMax:{
+        type:DataTypes.INTEGER,
+        allowNull:true
+      },
+     
+      status:{
+        type:DataTypes.ENUM('active','archived','closed'),
+        defaultValue:"active"
+      },
+      endTime:{
+        type:DataTypes.STRING,
+        allowNull:true
+      },
+      date:{
+        type:DataTypes.DATEONLY,
+        allowNull:true
+      }
+
 
 
      

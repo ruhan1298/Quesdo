@@ -70,7 +70,7 @@ import UserAuth from '../../middleware/UserAuth';
 
     authController.DeleteSubcategory(req, res);
   })
-  router.post("/update-subcategory", (req: Request, res: Response) => {
+  router.post("/update-subcategory",upload.single('image'), (req: Request, res: Response) => {
 
 
     authController.UpdateSubcategory(req, res);
@@ -108,5 +108,12 @@ import UserAuth from '../../middleware/UserAuth';
   router.post('/delete-post', (req: Request, res: Response) => {
     authController.PostDelete(req, res);
   })
+  router.post('/dashboard', (req: Request, res: Response) => {
+    authController.Dashboard(req, res);
+  })
+   router.post('/block-unblock', (req: Request, res: Response) => {
+    authController.BlockUnblock(req, res);
+  })
+
 
  export default router

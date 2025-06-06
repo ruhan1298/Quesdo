@@ -3,7 +3,7 @@ import { Model, DataTypes } from 'sequelize';
 import {sequelize} from '../../model/index';
 
 interface AdminAttributes {
-  id?: string; // Use string type for UUID
+  id?: number; // Use string type for UUID
   fullName?: string;
   image?: string;
   email?:string;
@@ -19,7 +19,7 @@ interface AdminAttributes {
 }
 
 class Admin extends Model<AdminAttributes> {
-    id!: string; // Use string type for UUID
+    id!: number; // Use string type for UUID
     fullName!: string;
     image!: string;
     email!:string;
@@ -39,9 +39,9 @@ Admin.init(
   {
    
     id: {
-        type: DataTypes.UUID, // Change this to UUID
-        defaultValue: DataTypes.UUIDV4, // Automatically generate UUID
+        type: DataTypes.INTEGER, // Change this to UUID
         allowNull: false,
+        autoIncrement: true,
         primaryKey: true,
       },
     image: {

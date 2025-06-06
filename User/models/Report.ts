@@ -40,9 +40,9 @@ Report.init(
     {
         id: {
           type: DataTypes.INTEGER, // Change this to UUID
-          defaultValue: uuidv4,  // Automatically generate UUIDs
           allowNull: false,
           primaryKey: true,
+          autoIncrement: true, // Auto-incrementing primary key
         },
         reporterId: {
           type: DataTypes.UUID,

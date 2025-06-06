@@ -7,15 +7,14 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import Category from "../models/category";
-import { Op, Sequelize } from "sequelize";
+import { Op, Sequelize ,literal } from "sequelize";
 import SubCategory from "../models/subcategory";
-import { Group, Interests, Post, User } from "../../model/index";
+import { GroupMember, Interests, Post, User } from "../../model/index";
 import { randomBytes } from 'crypto';
 
 
 import Report from "../../User/models/Report";
 import customerService from "../../User/models/customerService";
-import GroupMember from "../../User/models/GroupMember";
 const templatePath = path.join(__dirname, '../../views/otptemplate.hbs');
 const source = fs.readFileSync(templatePath, 'utf-8');
 const template = hbs.compile(source);
@@ -211,9 +210,10 @@ AdminLogin: async (req: Request, res: Response) => {
 
     // Generate a secure 6-digit OTP (reset token)
     const generateResetToken = () => {
-        const token = randomBytes(3).toString('hex');  // Generate 3 random bytes (6 hexadecimal characters)
-        return token;
-    };
+  const token = Math.floor(100000 + Math.random() * 900000); // 6 digit number between 100000 and 999999
+  return token.toString();
+};
+
     
     // Generate expiration time for the token (10 minutes from now)
     const resetExpires = new Date(Date.now() + 10 * 60 * 1000); // OTP expiration in 10 minutes
@@ -547,9 +547,11 @@ GetSubCategory: async (req: Request, res: Response) => {
 
 UpdateSubcategory: async (req: Request, res: Response) => {
   try {
-      const { id, Name, category_id } = req.body; // Subcategory data
-      const image = req.file?.path; // Normalize path
+      const {id,Name,category_id} = req.body; // Subcategory data
+            console.log(req.body, "BODY");
 
+      const image = req.file?.path; // Normalize path
+      
       // Validate subcategory exists
       const existingSubCategory = await SubCategory.findByPk(id);
       if (!existingSubCategory) {
@@ -608,19 +610,20 @@ UserList: async (req: Request, res: Response) => {
 
     // Create a search filter using Sequelize's `Op.or`
     const searchFilter: any = {
-      where: {
-        [Op.or]: [
-          { FirstName: { [Op.like]: `%${search}%` } },
-          { email: { [Op.like]: `%${search}%` } },
-          { dob: { [Op.like]: `%${search}%` } },
-          { gender: { [Op.like]: `%${search}%` } },
+  where: {
+    [Op.or]: [
+      { FirstName: { [Op.like]: `%${search}%` } },
+      { email: { [Op.like]: `%${search}%` } },
+      Sequelize.where(Sequelize.cast(Sequelize.col("dob"), "text"), {
+        [Op.like]: `%${search}%`,
+      }),
+      { gender: { [Op.like]: `%${search}%` } },
+    ],
+  },
+  offset,
+  limit,
+};
 
-      
-        ],
-      },
-      offset,
-      limit,
-    };
 
     // Add category filter only if it's not "all"
 
@@ -707,25 +710,27 @@ DeleteUser: async (req: Request, res: Response) => {
   try {
     const id = req.body.id;
 
-    // Step 1: Delete posts related to the user
-    await Post.destroy({
-      where: { userId: id },
-    });
+    // Step 1: Delete posts and interests related to the user
+    await Post.destroy({ where: { userId: id } });
+    await Interests.destroy({ where: { userId: id } });
 
-    await Interests.destroy({
-      where: { userId: id },
-    });
+    // Step 2: Manually filter and update groups containing this user
+    const allGroups = await GroupMember.findAll();
 
-    // Step 2: Remove user from all group members list (if `members` is JSON array)
-   await Group.findAll({
-      where: Sequelize.where(Sequelize.fn('JSON_CONTAINS', Sequelize.col('members'), JSON.stringify(id)), 1),
-    });
+    for (const group of allGroups) {
+      const members = group.members || [];
 
-    await User.destroy({
-      where: { id },
-    });
+      const hasUser = members.some((m: any) => m.userId === id);
+      if (hasUser) {
+        const updatedMembers = members.filter((m: any) => m.userId !== id);
+        await group.update({ members: updatedMembers });
+      }
+    }
 
-    res.json({ status: 1, message: "User deleted successfully" });
+    // Step 3: Delete the user
+    await User.destroy({ where: { id } });
+
+    return res.json({ status: 1, message: "User deleted successfully" });
 
   } catch (error) {
     console.error("Error in DeleteUser:", error);
@@ -735,33 +740,34 @@ DeleteUser: async (req: Request, res: Response) => {
       error: error instanceof Error ? error.message : error,
     });
   }
-},
+}
+,
+
+
+
+
 GetReportMember: async (req: Request, res: Response) => {
   try {
     const { page = 1, pageSize = 10, search = "" } = req.body;
     const offset = (Number(page) - 1) * Number(pageSize);
     const limit = Number(pageSize);
 
-    // Step 1: Get all reported user IDs from the Report table
+    // Step 1: Get all reports (no GROUP BY)
     const reports = await Report.findAll({
-      attributes: ["reportedId", "reporterId", "postId"], // Get reporterId and postId as well
-      group: ["reportedId"],
+      attributes: ["reportedId", "reporterId", "postId"],
     });
 
-    const reportedIds = reports.map((r: any) => r.reportedId);
-    const reporterIds = reports.map((r: any) => r.reporterId); // Get the reporter IDs
+    const reportedIds = [...new Set(reports.map((r: any) => r.reportedId))];
+    const reporterIds = [...new Set(reports.map((r: any) => r.reporterId))];
+    const postIds = [...new Set(reports.map((r: any) => r.postId))];
 
-    // Step 2: Find reported users from the User table
+    // Step 2: Get reported users
     const { count, rows } = await User.findAndCountAll({
-      attributes: ['id', 'FirstName', 'email', 'image'],
+      attributes: ["id", "FirstName", "email", "image", "isBlock"],
       where: {
-        id: {
-          [Op.in]: reportedIds,
-        },
+        id: { [Op.in]: reportedIds },
         ...(search && {
-          FirstName: {
-            [Op.like]: `%${search}%`,
-          },
+          FirstName: { [Op.like]: `%${search}%` },
         }),
       },
       offset,
@@ -769,53 +775,47 @@ GetReportMember: async (req: Request, res: Response) => {
       order: [["createdAt", "DESC"]],
     });
 
-    // Step 3: Find the titles of the posts that were reported
-    const postIds = reports.map((r: any) => r.postId); // Collect all postIds
+    // Step 3: Get posts
     const posts = await Post.findAll({
-      attributes: ['id', 'Title'],
-      where: {
-        id: {
-          [Op.in]: postIds,
-        },
-      },
+      attributes: ["id", "Title"],
+      where: { id: { [Op.in]: postIds } },
     });
-    console.log(posts, "POSTS");
-    
 
-    // Step 4: Find the details of the users who reported (reporterId)
+    // Step 4: Get reporters
     const reporters = await User.findAll({
-      attributes: ['id', 'FirstName', 'email', 'image'],
-      where: {
-        id: {
-          [Op.in]: reporterIds,
-        },
-      },
+      attributes: ["id", "FirstName", "email", "image"],
+      where: { id: { [Op.in]: reporterIds } },
     });
-    console.log(reporters, "REPORTER");
-    
 
-    // Step 5: Format the response to include the post titles and reporter details
+    // Step 5: Format data
     const formattedRows = rows.map((user: any) => {
-      // Find the post related to the report for the user
-      const post = posts.find((p: any) => p.id === user.id);
-      const reporter = reporters.find((r: any) => r.id === user.id);
+      // Get all reports for this user
+      const userReports = reports.filter((r: any) => r.reportedId === user.id);
+
+      const detailedReports = userReports.map((r: any) => {
+        const post = posts.find((p: any) => p.id === r.postId);
+        const reporter = reporters.find((rep: any) => rep.id === r.reporterId);
+        return {
+          postId: r.postId,
+          postTitle: post?.Title || null,
+          reporter: reporter
+            ? {
+                id: reporter.id,
+                FirstName: reporter.FirstName,
+                email: reporter.email,
+                image: reporter.image,
+              }
+            : null,
+        };
+      });
 
       return {
         ...user.dataValues,
-        reportedPostTitle: post ? post.Title : null,
-        reporterDetails: reporter
-          ? {
-              id: reporter.id,
-              FirstName: reporter.FirstName,
-              email: reporter.email,
-              image: reporter.image,
-            }
-          : null,
+        reports: detailedReports,
       };
-
     });
 
-    // Step 6: Send the response
+    // Step 6: Return response
     return res.status(200).json({
       status: 1,
       message: "Reported members fetched successfully",
@@ -826,13 +826,14 @@ GetReportMember: async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Error in GetReportMember:", error);
-    res.status(500).json({
+    return res.status(500).json({
       status: 0,
       message: "Internal server error",
       error: error instanceof Error ? error.message : error,
     });
   }
 },
+
 GetSupport : async (req: Request, res: Response) => {
   try {
     const { page = 1, pageSize = 10, search = "" } = req.body;
@@ -891,7 +892,7 @@ GetSupport : async (req: Request, res: Response) => {
           const messages = (req as any).messages
           const support = await customerService.findByPk(id);
           if (!support) {
-            return res.status(404).json({ message: messages.supportNotFound });
+            return res.status(404).json({ message: "Support request not found" });
           }
           const agentemail = support.userId; // Assuming userId is the email of the agent
           const agent = await User.findOne({
@@ -952,112 +953,113 @@ GetSupport : async (req: Request, res: Response) => {
           
         }
       },
-      PostDetails: async (req: Request, res: Response) => {
-        try {
-          const postId = req.body.postId;
-      
-          const postDetails = await Post.findAll({
-            where: { id: postId },
-            include: [
-              {
-                model: GroupMember,
-                as: 'group',
-                attributes: ['members'],
-              },
-              {
-                model: User,
-                as: 'user',
-                attributes: ['id', 'FirstName', 'image'],
-              },
-            ],
+     PostDetails: async (req: Request, res: Response) => {
+  try {
+    const postId = req.body.postId;
+
+    const postDetails = await Post.findAll({
+      where: { id: postId },
+      include: [
+        {
+          model: GroupMember,
+          as: 'groupMembers',
+          attributes: ['members'],
+        },
+        {
+          model: User,
+          as: 'user',
+          attributes: ['id', 'FirstName', 'image'],
+        },
+      ],
+    });
+
+    const result = await Promise.all(postDetails.map(async (post: any) => {
+      const postJSON = post.toJSON();
+
+      // Combine all members from all groupMembers records
+      const membersData = postJSON.groupMembers?.flatMap((group: any) => group.members) ?? [];
+      console.log(membersData, "MEMBER DATA");
+
+      // Fetch each member's details
+      const enrichedMembers = await Promise.all(
+        membersData.map(async (member: any) => {
+          const user = await User.findOne({
+            where: { id: member.userId },
+            attributes: ['id', 'FirstName', 'image']
           });
-      
-          const result = await Promise.all(postDetails.map(async (post: any) => {
-            const postJSON = post.toJSON();
-      
-            const membersData = postJSON.group?.members ?? [];
-            console.log(membersData,"MEMBER DATA");
-            
-      
-            // Fetch each member's name and image
-            const enrichedMembers = await Promise.all(
-              membersData.map(async (member: any) => {
-                const user = await User.findOne({
-                  where: { id: member.userId },
-                  attributes: ['id','FirstName', 'image']
-                });
-          console.log(user,"USER");
-            
-                console.log(`Looking for userId: ${member.userId}`, '=> Found:', !!user);
-            
-                return {
-                  id:user?.id ?? null ,
-                  name: user?.FirstName ?? null,
-                  image: user?.image ?? null,
-                };
-              })
-            );
-      
-            // Remove unwanted fields
-            delete postJSON.group;
-            delete postJSON.user;
-      
-            return {
-              ...postJSON,
-              members: enrichedMembers,
-              joinedCount: enrichedMembers.length,
-              groupSize: postJSON.GroupSize,
-              createByUserid:post.user?.id ?? null ,
-              CreatedBy: post.user?.FirstName ?? null,
-              userImage: post.user?.image ?? null,
-            };
-          }));
-      
-          return res.json({
-            status: 1,
-            message: "Post details fetched successfully",
-            data: result
-          });
-        } catch (error) {
-          console.error(error);
-          res.status(500).json({
-            status: 0,
-            message: "Internal server error"
-          });
-        }
-      },
+
+          console.log(`Looking for userId: ${member.userId}`, '=> Found:', !!user);
+
+          return {
+            id: user?.id ?? null,
+            name: user?.FirstName ?? null,
+            image: user?.image ?? null,
+          };
+        })
+      );
+
+      // Clean up
+      delete postJSON.groupMembers;
+      delete postJSON.user;
+
+      return {
+        ...postJSON,
+        members: enrichedMembers,
+        joinedCount: enrichedMembers.length,
+        groupSize: postJSON.GroupSize,
+        createByUserid: post.user?.id ?? null,
+        CreatedBy: post.user?.FirstName ?? null,
+        userImage: post.user?.image ?? null,
+      };
+    }));
+
+    return res.json({
+      status: 1,
+      message: "Post details fetched successfully",
+      data: result
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      status: 0,
+      message: "Internal server error"
+    });
+  }
+},
+
       RemoveMember: async (req:Request,res:Response) =>{
-        try {
-          const {postId,memberId} = req.body
-          const group = await Group.findOne({ where: { postId } });
+      //   try {
+      //     const {postId,memberId} = req.body
+      //     const group = await GroupMember.findOne({ where: { postId } });
 
-          if (!group) {
-            return res.status(404).json({ status: 0, message: 'Group not found for this post' });
-          }
+      //     if (!group) {
+      //       return res.status(404).json({ status: 0, message: 'Group not found for this post' });
+      //     }
 
-         let members: MemberDetails[] = group.members as MemberDetails[];
+      //    let members: MemberDetails[] = group.members as MemberDetails[];
      
-         // Debug: Print current members
-         console.log('Before removal, members:', members);
+      //    // Debug: Print current members
+      //    console.log('Before removal, members:', members);
      
-         // Trim ID for safety
-         const cleanMemberId = memberId?.toString().trim();
+      //    // Trim ID for safety
+      //    const cleanMemberId = memberId?.toString().trim();
      
-         // Remove the member
-         members = members.filter((member) => member.userId !== cleanMemberId);
+      //    // Remove the member
+      //    members = members.filter((member) => member.userId !== cleanMemberId);
      
-         // Debug: Print members after filter
-         console.log('After removal, members:', members);
+      //    // Debug: Print members after filter
+      //    console.log('After removal, members:', members);
      
      
-           await group.update({ members });
-           return res.status(200).json({ status: 1, message: 'Member removed successfully' });
+      //      await group.update({ members });
+      //      return res.status(200).json({ status: 1, message: 'Member removed successfully' });
      
     
-      } catch (error) {
-        console.error('Error removing from group:', error);
-        return res.status(500).json({ status: 0, message: 'Internal Server Error' });
-      }
+      // } catch (error) {
+      //   console.error('Error removing from group:', error);
+      //   return res.status(500).json({ status: 0, message: 'Internal Server Error' });
+      // }
       },
       PostDelete: async (req: Request, res: Response) => {
         try {
@@ -1068,7 +1070,7 @@ GetSupport : async (req: Request, res: Response) => {
           }
       
           // Step 1: Delete the group related to the post
-          await Group.destroy({ where: { postId } });
+          await GroupMember.destroy({ where: { postId } });
       
           // Step 2: Delete the post
           const deletedCount = await Post.destroy({ where: { id: postId } });
@@ -1082,7 +1084,69 @@ GetSupport : async (req: Request, res: Response) => {
           console.error("Error deleting post and group:", error);
           return res.status(500).json({status: 0, message: "Internal server error." });
         }
-      }
+      },
+      Dashboard: async (req: Request, res: Response) => {
+        try {
+          const totalUsers = await User.count();
+          const totalPosts = await Post.count();
+          const totalCategories = await Category.count();
+          const totalSubCategories = await SubCategory.count();
+          const totalReports = await Report.count();
+          const totalSupport = await customerService.count();
+
+          res.json({
+            status: 1,
+            message: "Dashboard data fetched successfully",
+            data: {
+              totalUsers,
+              totalPosts,
+              totalCategories,
+              totalSubCategories,
+              totalReports,
+              totalSupport
+            }
+          });
+        } catch (error) {
+          console.error("Error fetching dashboard data:", error);
+          res.status(500).json({ status: 0, message: "Internal server error" });
+        }
+      },
+      BlockUnblock: async (req: Request, res: Response) => {
+          try {
+            const { id, action } = req.body;
+        
+            if (!id  || !["block", "unblock"].includes(action)) {
+              return res.status(400).json({ status: 1, message: "User ID, type, and valid action are required" });
+            }
+        
+            // Determine block status
+            const isBlock = action === "block";
+        
+       
+            // Check current status before updating
+            const user = await User.findOne({ where: { id } });
+        
+            if (!user) {
+              return res.status(404).json({ status: 1, message: "User not found" });
+            }
+        
+            if (user.isBlock === isBlock) {
+              return res.status(400).json({
+                status: 1,
+                message: isBlock ? "This user is already blocked" : "This user is already unblocked"
+              });
+            }
+        
+            // Update block status
+            await User.update({ isBlock }, { where: { id } });
+        
+            return res.status(200).json({ status: 1, message: `User ${action}ed successfully` });
+        
+          } catch (error) {
+            console.error("Error updating block status:", error);
+            return res.status(500).json({ status: 1, message: "Internal server error" });
+          }
+        },
       
 
   }

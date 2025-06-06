@@ -11,7 +11,7 @@ moduleId?:string
 // userType?:string
 isRead?:boolean
 senderId?:string
-  
+isActive?:boolean 
  
 
 }
@@ -26,6 +26,7 @@ class Notification extends Model<NotificationAttributes> {
 //    userType!:string
    isRead!:boolean
    senderId!:string
+    isActive!:boolean
      
    
 
@@ -68,7 +69,12 @@ Notification.init(
       senderId:{
         type:DataTypes.STRING,
     allowNull:true
+      },
+      isActive: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true
       }
+      
   
   
 

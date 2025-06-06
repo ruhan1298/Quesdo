@@ -10,7 +10,7 @@ interface UserAttributes {
   password?:string
   isCompletedProfile?:boolean
 //   role?:string
-dob?:Date
+dob?:string
 gender?:string
 
 //   permissions?: string[]; // Store allowed actions
@@ -36,6 +36,7 @@ ageRangeMin?:number
 ageRangeMax?:number
 deviceToken?:string
 deviceType?:string
+isBlock?:Boolean
 
   
  
@@ -49,7 +50,7 @@ class User extends Model<UserAttributes> {
     email!:string;
     // mobilenumber!:string;
     password!:string;
-    dob!:Date
+    dob!:string 
     gender!:string
     // role!:string;
     // permissions!: string[]; // Store allowed actions
@@ -71,10 +72,11 @@ eventUpdate!:boolean
 memories!:boolean
 minDistanceKm!:number
 maxDistanceKm!:number
-ageRangemax!:number
+ageRangeMax!:number
 ageRangeMin!:number
 deviceToken!:string
 deviceType!:string
+isBlock!:boolean
 
 
    
@@ -117,7 +119,7 @@ User.init(
         allowNull: true,
       },
   dob:{
-    type:DataTypes.DATE,
+    type:DataTypes.STRING,
     allowNull:true
 
 
@@ -173,15 +175,15 @@ minDistanceKm: {
 },
 maxDistanceKm: {
   type: DataTypes.INTEGER,
-  defaultValue: 20,
+  defaultValue: 15,
 },
 ageRangeMin: {
   type: DataTypes.INTEGER,
-  defaultValue: 18,
+  // defaultValue: 18,
 },
 ageRangeMax: {
   type: DataTypes.INTEGER,
-  defaultValue: 38,
+  // defaultValue: 38,
 },
 showNowAvailable: {
   type: DataTypes.BOOLEAN,
@@ -208,8 +210,11 @@ deviceToken:{
 deviceType:{
   type:DataTypes.STRING,
   allowNull:true
-}
-
+},
+isBlock:{
+  type:DataTypes.BOOLEAN, 
+  defaultValue: false,
+},
 
   },
 
