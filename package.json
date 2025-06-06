@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "build": "tsc",
+      "prebuild": "node scripts/qesdo.js",
+
     "start": "node dist/app.js"
   },
   "dependencies": {
