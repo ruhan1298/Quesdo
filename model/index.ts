@@ -2,17 +2,16 @@ import dotenv from 'dotenv';
 import { Sequelize } from 'sequelize';
 
 dotenv.config();
-
+// Initialize Sequelize with PostgreSQL configuration
 const sequelize = new Sequelize({
-  database: process.env.DB_NAME!,      // your PostgreSQL database name
-  username: process.env.DB_USER!,      // your PostgreSQL username
-  password: process.env.DB_PASSWORD!,  // your PostgreSQL password
-  host: process.env.DB_HOST!,          // your PostgreSQL host
-  port: parseInt(process.env.DB_PORT ?? '5432', 10),  // default PostgreSQL port is 5432
+  database: 'qesdo',
+  username: 'qesdouser',
+  password: 'eluUYkByn0AN5kHIsyJKlNXhB2YWMZoE',
+  host: 'dpg-d118n4h5pdvs73enhjpg-a',
+  port: 5432, // PostgreSQL default port
   dialect: 'postgres',
   logging: false,
 });
-
 
 // Import models *after* initializing sequelize
 import Category from '../Admin/models/category';

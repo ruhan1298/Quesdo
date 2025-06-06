@@ -3,6 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+        "build": "tsc",
+
     "start": "nodemon --exec ts-node app.ts"
   },
   "dependencies": {
